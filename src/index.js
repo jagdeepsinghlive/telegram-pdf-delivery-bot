@@ -844,7 +844,7 @@ async function sendProductCard(chatId, product, env) {
 async function openProduct(chatId, productId, env) {
   const products = await sb(env, "products", {
     select:
-      "id,product_id,title,description,price,file_name,file_size,cover_image,category_id,product_type,status,deleted_at",
+      "id,product_id,title,description,price,file_name,file_size,mime_type,cover_image,category_id,product_type,status,deleted_at,telegram_file_id",
     filter: [
       { column: "product_id", operator: "eq", value: productId },
       { column: "status", operator: "eq", value: "active" }
@@ -878,7 +878,7 @@ async function openProduct(chatId, productId, env) {
     title: product.title,
     description: product.description,
     price: product.price,
-    telegram_file_id: null,
+    telegram_file_id: product.telegram_file_id || null,
     file_name: product.file_name,
     file_size: product.file_size,
     mime_type: null,
