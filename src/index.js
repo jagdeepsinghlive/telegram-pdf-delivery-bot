@@ -707,7 +707,8 @@ function mainKeyboard(chatId, env) {
       { text: "🔎 Search", callback_data: "search_products" }
     ],
     [
-      { text: "📂 Categories", callback_data: "categories" }
+      { text: "📂 Categories", callback_data: "categories" },
+      { text: "✨ More", callback_data: "more_menu" }
     ],
     [
       { text: "👨‍💻 Contact Admin", callback_data: "contact_admin" }
@@ -1366,6 +1367,19 @@ async function handleCallback(query, env) {
     return;
   }
 
+  if (data === "more_menu") {
+    const website = await getSetting(env, "website_url");
+    await sendMessage(chatId, "<b>✨ More Options</b>\n\nChoose an option:", env, {
+      reply_markup:{inline_keyboard:[
+        [{text:"📚 Latest PDFs",callback_data:"latest_products"}],
+        [{text:"📂 Categories",callback_data:"categories"}],
+        ...(website ? [[{text:"🌐 Website",url:website}]] : []),
+        [{text:"👨‍💻 Contact Admin",callback_data:"contact_admin"}]
+      ]}
+    });
+    return;
+  }
+
   if (data.startsWith("open_product:")) {
     await openProduct(
       chatId,
@@ -1536,6 +1550,52 @@ async function handleCallback(query, env) {
     return;
   }
 
+  if (data.startsWith("edit_product_title:")) {
+    if (await canAdmin(chatId, "product", env)) {
+      const productId=data.substring("edit_product_title:".length);
+      await setSession(env, chatId, {step:"edit_product_title",edit_product_id:productId,expires_at:new Date(Date.now()+20*60*1000).toISOString()});
+      await sendMessage(chatId,"📝 Send the new product title.",env);
+    }
+    return;
+  }
+
+  if (data.startsWith("edit_product_description:")) {
+    if (await canAdmin(chatId, "product", env)) {
+      const productId=data.substring("edit_product_description:".length);
+      await setSession(env, chatId, {step:"edit_product_description",edit_product_id:productId,expires_at:new Date(Date.now()+20*60*1000).toISOString()});
+      await sendMessage(chatId,"📄 Send the new product description.",env);
+    }
+    return;
+  }
+
+  if (data.startsWith("edit_product:")) {
+    if (await canAdmin(chatId, "product", env)) {
+      await startEditProduct(chatId, data.substring("edit_product:".length), env);
+    }
+    return;
+  }
+
+  if (data.startsWith("delete_product:")) {
+    if (await canAdmin(chatId, "product", env)) {
+      await deleteProduct(chatId, data.substring("delete_product:".length), env);
+    }
+    return;
+  }
+
+  if (data.startsWith("edit_category:")) {
+    if (await canAdmin(chatId, "product", env)) {
+      await startEditCategory(chatId, Number(data.substring("edit_category:".length)), env);
+    }
+    return;
+  }
+
+  if (data.startsWith("delete_category:")) {
+    if (await canAdmin(chatId, "product", env)) {
+      await deleteCategory(chatId, Number(data.substring("delete_category:".length)), env);
+    }
+    return;
+  }
+
   if (data === "admin_list_categories") {
     if (await canAdmin(chatId, "product", env)) {
       await adminCategories(chatId, env);
@@ -1661,16 +1721,11 @@ async function adminProducts(chatId, env) {
       reply_markup: {
         inline_keyboard: [
           [
-            {
-              text: "➕ Add Product",
-              callback_data: "admin_add_product"
-            }
+            { text: "➕ Add Product", callback_data: "admin_add_product" },
+            { text: "📋 Product List", callback_data: "admin_list_products" }
           ],
           [
-            {
-              text: "📋 Product List",
-              callback_data: "admin_list_products"
-            }
+            { text: "🔄 Refresh", callback_data: "admin_list_products" }
           ]
         ]
       }
@@ -2092,9 +2147,11 @@ async function adminProductList(chatId, env) {
   });
 
   if (!products.length) {
-    await sendMessage(chatId, "📦 No products.", env);
+    await sendMessage(chatId, "📦 No products found. Tap ➕ Add Product to publish your first PDF.", env);
     return;
   }
+
+  await sendMessage(chatId, `<b>📦 Products</b>\n\nTotal: <b>${products.length}</b>\nTap a product to edit or delete it.`, env);
 
   for (const p of products) {
     await sendMessage(
@@ -2110,9 +2167,12 @@ Status: ${escapeHtml(p.status)}`,
           inline_keyboard: [
             [
               {
+                text: "✏️ Edit",
+                callback_data: `edit_product:${p.product_id}`
+              },
+              {
                 text: "🗑 Delete",
-                callback_data:
-                  `delete_product:${p.product_id}`
+                callback_data: `delete_product:${p.product_id}`
               }
             ]
           ]
@@ -2199,6 +2259,61 @@ async function adminUsers(chatId, env) {
    CATEGORY ADMIN
 ========================================================= */
 
+async function startEditProduct(chatId, productId, env) {
+  const rows = await sb(env, "products", {
+    select: "product_id,title,description",
+    filter: [{column:"product_id",operator:"eq",value:productId}],
+    limit: 1
+  });
+  if (!rows.length) { await sendMessage(chatId, "❌ Product not found.", env); return; }
+  await sendMessage(chatId, `<b>✏️ Edit Product</b>\n\n${escapeHtml(rows[0].title)}\n\nChoose what to edit:`, env, {
+    reply_markup:{inline_keyboard:[
+      [{text:"📝 Title",callback_data:`edit_product_title:${productId}`}],
+      [{text:"📄 Description",callback_data:`edit_product_description:${productId}`}],
+      [{text:"📋 Product List",callback_data:"admin_list_products"}]
+    ]}
+  });
+}
+
+async function startEditCategory(chatId, categoryId, env) {
+  const rows = await sb(env, "categories", {
+    select: "id,name",
+    filter: [{column:"id",operator:"eq",value:categoryId}],
+    limit: 1
+  });
+  if (!rows.length) { await sendMessage(chatId, "❌ Category not found.", env); return; }
+  await setSession(env, chatId, {
+    step:"edit_category_name",
+    edit_category_id: categoryId,
+    expires_at:new Date(Date.now()+20*60*1000).toISOString()
+  });
+  await sendMessage(chatId, `✏️ Send the new name for <b>${escapeHtml(rows[0].name)}</b>.`, env);
+}
+
+async function deleteCategory(chatId, categoryId, env) {
+  const rows = await sb(env, "categories", {
+    select:"id,name",
+    filter:[{column:"id",operator:"eq",value:categoryId}],
+    limit:1
+  });
+  if (!rows.length) { await sendMessage(chatId,"❌ Category not found.",env); return; }
+
+  const products = await sb(env,"products",{
+    select:"id",
+    filter:[{column:"category_id",operator:"eq",value:categoryId},{column:"status",operator:"eq",value:"active"}],
+    limit:1
+  });
+  if (products.length) {
+    await sendMessage(chatId,"⚠️ This category has products. Reassign/remove those products first.",env);
+    return;
+  }
+
+  await sbDelete(env,"categories",[{column:"id",operator:"eq",value:categoryId}]);
+  await sendMessage(chatId,`🗑 <b>Category deleted</b>\n\n${escapeHtml(rows[0].name)}`,env,{
+    reply_markup:{inline_keyboard:[[ {text:"📂 Categories",callback_data:"admin_list_categories"} ]]}
+  });
+}
+
 async function adminCategories(chatId, env) {
   const categories = await sb(env, "categories", {
     select: "id,category_id,name,slug,status",
@@ -2207,13 +2322,19 @@ async function adminCategories(chatId, env) {
 
   let text = "<b>📂 Categories</b>\n\n";
 
+  const buttons = [];
   for (const c of categories) {
     text +=
       `• <b>${escapeHtml(c.name)}</b>\n` +
       `ID: <code>${escapeHtml(c.category_id)}</code>\n` +
       `Slug: <code>${escapeHtml(c.slug)}</code>\n` +
       `Status: ${escapeHtml(c.status)}\n\n`;
+    buttons.push([
+      { text: `✏️ Edit ${c.name}`, callback_data: `edit_category:${c.id}` },
+      { text: "🗑 Delete", callback_data: `delete_category:${c.id}` }
+    ]);
   }
+  buttons.push([{ text: "➕ Add Category", callback_data: "admin_add_category" }]);
 
   await sendMessage(
     chatId,
@@ -2221,14 +2342,7 @@ async function adminCategories(chatId, env) {
     env,
     {
       reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: "➕ Add Category",
-              callback_data: "admin_add_category"
-            }
-          ]
-        ]
+        inline_keyboard: buttons
       }
     }
   );
@@ -2403,6 +2517,56 @@ async function handleSessionText(message, session, env) {
         );
       }
 
+      return true;
+    }
+
+    case "edit_product_title": {
+      const title = String(message.text || "").trim();
+      if (!title) { await sendMessage(chatId, "❌ Title cannot be empty.", env); return true; }
+      const productId = session.edit_product_id;
+      await sbUpdate(env, "products",
+        [{ column: "product_id", operator: "eq", value: productId }],
+        { title, updated_at: new Date().toISOString() }
+      );
+      await clearSession(chatId, env);
+      await sendMessage(chatId, "✅ Product title updated.", env, {
+        reply_markup: { inline_keyboard: [[{text:"📋 Product List",callback_data:"admin_list_products"}]] }
+      });
+      return true;
+    }
+
+    case "edit_product_description": {
+      const description = String(message.text || "").trim();
+      const productId = session.edit_product_id;
+      await sbUpdate(env, "products",
+        [{ column: "product_id", operator: "eq", value: productId }],
+        { description, updated_at: new Date().toISOString() }
+      );
+      await clearSession(chatId, env);
+      await sendMessage(chatId, "✅ Product description updated.", env, {
+        reply_markup: { inline_keyboard: [[{text:"📋 Product List",callback_data:"admin_list_products"}]] }
+      });
+      return true;
+    }
+
+    case "edit_category_name": {
+      const name = String(message.text || "").trim();
+      if (!name) { await sendMessage(chatId, "❌ Category name cannot be empty.", env); return true; }
+      const slug = slugify(name);
+      const exists = await sb(env, "categories", {
+        select: "id",
+        filter: [{column:"slug",operator:"eq",value:slug},{column:"id",operator:"neq",value:session.edit_category_id}],
+        limit: 1
+      });
+      if (exists.length) { await sendMessage(chatId, "❌ Another category already uses this name.", env); return true; }
+      await sbUpdate(env, "categories",
+        [{ column:"id", operator:"eq", value:session.edit_category_id }],
+        { name, slug }
+      );
+      await clearSession(chatId, env);
+      await sendMessage(chatId, "✅ Category updated.", env, {
+        reply_markup:{inline_keyboard:[[ {text:"📂 Categories",callback_data:"admin_list_categories"} ]]}
+      });
       return true;
     }
 
