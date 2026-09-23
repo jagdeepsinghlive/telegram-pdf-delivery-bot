@@ -28,15 +28,17 @@ export default {
         return corsResponse("", 204);
       }
 
-      // Health
+      // Public SEO-first storefront.
       if (request.method === "GET" && url.pathname === "/") {
-        return json({
-          ok: true,
-          name: "PDF ORBIT",
-          status: "online",
-          api: true,
-          time: new Date().toISOString()
-        });
+        return await websiteHome(request, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/robots.txt") {
+        return await websiteRobots(request, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/sitemap.xml") {
+        return await websiteSitemap(request, env);
       }
 
       if (request.method === "GET" && url.pathname === "/health") {
@@ -59,6 +61,18 @@ export default {
 
       if (request.method === "GET" && url.pathname === "/api/settings") {
         return await apiSettings(env);
+      }
+
+      if (request.method === "GET" && url.pathname.startsWith("/category/")) {
+        return await websiteCategory(request, env, decodeURIComponent(url.pathname.substring(9)));
+      }
+
+      if (request.method === "GET" && url.pathname.startsWith("/product/")) {
+        return await websiteProduct(request, env, decodeURIComponent(url.pathname.substring(9)));
+      }
+
+      if (request.method === "GET" && url.pathname.startsWith("/p/")) {
+        return await websiteProduct(request, env, decodeURIComponent(url.pathname.substring(3)));
       }
 
       if (request.method === "GET" && url.pathname === "/api/search") {
@@ -704,7 +718,7 @@ function mainKeyboard(chatId, env) {
   const rows = [
     [
       { text: "📚 Latest PDFs", callback_data: "latest_products" },
-      { text: "🔎 Search PDF", url: "https://pdforbits.blogspot.com/" }
+      { text: "🔎 Search PDF", callback_data: "search_products" }
     ],
     [
       { text: "📂 Categories", callback_data: "categories" },
@@ -1347,6 +1361,18 @@ async function handleCallback(query, env) {
     env
   );
 
+  if (data === "main_menu") {
+    await clearSession(chatId, env);
+    await sendMessage(chatId, "🏠 <b>Main Menu</b>\n\nChoose an option:", env, mainKeyboard(chatId, env));
+    return;
+  }
+
+  if (data === "back_admin") {
+    await clearSession(chatId, env);
+    await adminPanel(chatId, env);
+    return;
+  }
+
   if (data === "latest_products") {
     await latestProducts(chatId, env);
     return;
@@ -1371,11 +1397,12 @@ async function handleCallback(query, env) {
     const website = await getSetting(env, "website_url");
     await sendMessage(chatId, "<b>✨ More Options</b>\n\nChoose an option:", env, {
       reply_markup:{inline_keyboard:[
-        [{text:"🔎 Search PDF Website",url:"https://pdforbits.blogspot.com/"}],
+        [{text:"🔎 Search PDF",callback_data:"search_products"}],
         [{text:"📚 Latest PDFs",callback_data:"latest_products"}],
         [{text:"📂 Categories",callback_data:"categories"}],
         ...(website ? [[{text:"🌐 Website",url:website}]] : []),
-        [{text:"👨‍💻 Contact Admin",callback_data:"contact_admin"}]
+        [{text:"👨‍💻 Contact Admin",callback_data:"contact_admin"}],
+        [{text:"🔙 Main Menu",callback_data:"main_menu"}]
       ]}
     });
     return;
@@ -1467,6 +1494,8 @@ async function handleCallback(query, env) {
     return;
   }
 
+  if (await handleProductCreationCallback(chatId, data, env)) return;
+
   /* Admin callbacks */
 
   if (data === "admin_panel") {
@@ -1490,6 +1519,26 @@ async function handleCallback(query, env) {
     return;
   }
 
+  if (data === "admin_task_products") {
+    if (await canAdmin(chatId, "task", env)) await adminTaskProducts(chatId, env);
+    return;
+  }
+
+  if (data.startsWith("admin_task_list:")) {
+    if (await canAdmin(chatId, "task", env)) await adminTaskList(chatId, Number(data.substring(16)), env);
+    return;
+  }
+
+  if (data.startsWith("admin_add_task:")) {
+    if (await canAdmin(chatId, "task", env)) await startNewTask(chatId, Number(data.substring(15)), env);
+    return;
+  }
+
+  if (data.startsWith("delete_task:")) {
+    if (await canAdmin(chatId, "task", env)) await deleteTask(chatId, Number(data.substring(12)), env);
+    return;
+  }
+
   if (data === "admin_users") {
     if (await canAdmin(chatId, "user", env)) {
       await adminUsers(chatId, env);
@@ -1508,6 +1557,11 @@ async function handleCallback(query, env) {
     if (await canAdmin(chatId, "product", env)) {
       await adminWebsite(chatId, env);
     }
+    return;
+  }
+
+  if (data.startsWith("edit_setting:")) {
+    if (await canAdmin(chatId, "product", env)) await startEditSetting(chatId, data.substring(13), env);
     return;
   }
 
@@ -1540,12 +1594,13 @@ async function handleCallback(query, env) {
 
   if (data.startsWith("delete_product:")) {
     if (await canAdmin(chatId, "product", env)) {
-      await deleteProduct(
-        chatId,
-        data.substring("delete_product:".length),
-        env
-      );
+      await deleteProduct(chatId, data.substring("delete_product:".length), env);
     }
+    return;
+  }
+
+  if (data.startsWith("product_info:")) {
+    if (await canAdmin(chatId, "product", env)) await adminProductInfo(chatId, data.substring(13), env);
     return;
   }
 
@@ -1755,6 +1810,12 @@ async function adminPanel(chatId, env) {
         text: "🧹 Cleanup",
         callback_data: "admin_cleanup"
       }
+    ],
+    [
+      {
+        text: "🔙 Main Menu",
+        callback_data: "main_menu"
+      }
     ]
   ];
 
@@ -1784,7 +1845,8 @@ async function adminProducts(chatId, env) {
           ],
           [
             { text: "🔄 Refresh", callback_data: "admin_list_products" }
-          ]
+          ],
+          [{ text: "🔙 Admin Panel", callback_data: "back_admin" }]
         ]
       }
     }
@@ -2235,6 +2297,15 @@ Status: ${escapeHtml(p.status)}\nPrice: <b>FREE</b>`,
   }
 }
 
+async function adminProductInfo(chatId, productId, env) {
+  const rows = await sb(env, "products", { select: "id,product_id,title,description,status,category_id,product_type,created_at", filter: [{ column: "product_id", operator: "eq", value: productId }], limit: 1 });
+  if (!rows.length) return sendMessage(chatId, "❌ Product not found.", env);
+  const p = rows[0];
+  const cat = p.category_id ? await sb(env, "categories", { select: "slug", filter: [{ column: "id", operator: "eq", value: p.category_id }], limit: 1 }) : [];
+  const url = `${await siteOrigin(null, env)}/p/${slugify(cat[0]?.slug || "library")}/${slugify(p.title)}/${encodeURIComponent(p.product_id)}`;
+  await sendMessage(chatId, `<b>ℹ️ Product Info</b>\n\n<b>${escapeHtml(p.title)}</b>\nID: <code>${escapeHtml(p.product_id)}</code>\nStatus: ${escapeHtml(p.status)}\n\n🔗 <code>${escapeHtml(url)}</code>`, env, { reply_markup: { inline_keyboard: [[{ text: "✏️ Edit", callback_data: `edit_product:${p.product_id}` }], [{ text: "🔙 Product List", callback_data: "admin_list_products" }]] } });
+}
+
 async function deleteProduct(chatId, productId, env) {
   const products = await sb(env, "products", {
     select: "id,title",
@@ -2275,13 +2346,47 @@ async function deleteProduct(chatId, productId, env) {
 ========================================================= */
 
 async function adminTasks(chatId, env) {
-  await sendMessage(
-    chatId,
-    `<b>📋 Task Management</b>
+  await sendMessage(chatId, "<b>📋 Task Management</b>\n\nAdd, view, and remove required tasks for any product.", env, {
+    reply_markup: { inline_keyboard: [
+      [{ text: "➕ Add / Manage Tasks", callback_data: "admin_task_products" }],
+      [{ text: "🔙 Admin Panel", callback_data: "back_admin" }]
+    ] }
+  });
+}
 
-Task creation can be added to a selected product from this panel.`,
-    env
-  );
+async function adminTaskProducts(chatId, env) {
+  const products = await sb(env, "products", { select: "id,product_id,title,status", order: "created_at.desc", limit: 50 });
+  const rows = products.map(p => [{ text: `📄 ${String(p.title || p.product_id).substring(0, 42)}`, callback_data: `admin_task_list:${p.id}` }]);
+  rows.push([{ text: "🔙 Task Management", callback_data: "admin_tasks" }]);
+  await sendMessage(chatId, "<b>📄 Select a product</b>\n\nChoose a product to manage its tasks:", env, { reply_markup: { inline_keyboard: rows } });
+}
+
+async function adminTaskList(chatId, productDbId, env) {
+  const products = await sb(env, "products", { select: "id,title,product_id", filter: [{ column: "id", operator: "eq", value: productDbId }], limit: 1 });
+  if (!products.length) return sendMessage(chatId, "❌ Product not found.", env);
+  const tasks = await sb(env, "product_tasks", { select: "id,task_type,title,task_url,required_count,required,status", filter: [{ column: "product_id", operator: "eq", value: productDbId }], order: "sort_order.asc", limit: 50 });
+  let text = `<b>📋 Tasks: ${escapeHtml(products[0].title)}</b>\n\n`;
+  if (!tasks.length) text += "No tasks added yet.\n";
+  const rows = [];
+  for (const t of tasks) {
+    text += `• ${escapeHtml(t.title)} — ${escapeHtml(t.task_type)}\n`;
+    rows.push([{ text: `🗑 ${String(t.title).substring(0, 35)}`, callback_data: `delete_task:${t.id}` }]);
+  }
+  rows.unshift([{ text: "➕ Add Task", callback_data: `admin_add_task:${productDbId}` }]);
+  rows.push([{ text: "🔙 Products", callback_data: "admin_task_products" }]);
+  await sendMessage(chatId, text, env, { reply_markup: { inline_keyboard: rows } });
+}
+
+async function startNewTask(chatId, productDbId, env) {
+  await setSession(env, chatId, { step: "task_type", task_product_id: productDbId, expires_at: new Date(Date.now() + 20 * 60 * 1000).toISOString() });
+  await sendMessage(chatId, "<b>➕ Add Task — Step 1/4</b>\n\nSend type: <code>channel</code>, <code>group</code>, <code>referral</code>, <code>website</code>, or <code>custom</code>.\n\nUse /cancel to stop.", env, { reply_markup: { inline_keyboard: [[{ text: "🔙 Cancel", callback_data: `admin_task_list:${productDbId}` }]] } });
+}
+
+async function deleteTask(chatId, taskId, env) {
+  const rows = await sb(env, "product_tasks", { select: "id,title,product_id", filter: [{ column: "id", operator: "eq", value: taskId }], limit: 1 });
+  if (!rows.length) return sendMessage(chatId, "❌ Task not found.", env);
+  await sbDelete(env, "product_tasks", [{ column: "id", operator: "eq", value: taskId }]);
+  await sendMessage(chatId, `🗑 <b>Task deleted</b>\n\n${escapeHtml(rows[0].title)}`, env, { reply_markup: { inline_keyboard: [[{ text: "📋 Back to Tasks", callback_data: `admin_task_list:${rows[0].product_id}` }]] } });
 }
 
 /* =========================================================
@@ -2482,9 +2587,48 @@ Website:
 Contact:
 <code>${escapeHtml(contact || "Not set")}</code>
 
-Use the setting editor through the admin session if required.`,
-    env
+Use the buttons below to update the public storefront.`,
+    env,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "✏️ Site Name", callback_data: "edit_setting:site_name" }],
+          [{ text: "✏️ Site Description", callback_data: "edit_setting:site_description" }],
+          [{ text: "✏️ Website URL", callback_data: "edit_setting:website_url" }],
+          [{ text: "✏️ Contact Admin", callback_data: "edit_setting:contact_admin" }],
+          [{ text: "🔙 Admin Panel", callback_data: "back_admin" }]
+        ]
+      }
+    }
   );
+}
+
+async function startEditSetting(chatId, key, env) {
+  const allowed = ["site_name", "site_description", "website_url", "contact_admin"];
+  if (!allowed.includes(key)) return;
+  await setSession(env, chatId, {
+    step: "setting_value",
+    setting_key: key,
+    expires_at: new Date(Date.now() + 20 * 60 * 1000).toISOString()
+  });
+  await sendMessage(chatId, `✏️ Send the new value for <code>${key}</code>.`, env, {
+    reply_markup: { inline_keyboard: [[{ text: "🔙 Website Settings", callback_data: "admin_website" }]] }
+  });
+}
+
+async function saveSetting(key, value, env) {
+  const existing = await sb(env, "settings", {
+    select: "id",
+    filter: [{ column: "key", operator: "eq", value: key }],
+    limit: 1
+  });
+  if (existing.length) {
+    return await sbUpdate(env, "settings", [{ column: "key", operator: "eq", value: key }], {
+      value,
+      updated_at: new Date().toISOString()
+    });
+  }
+  return await sbInsert(env, "settings", { key, value });
 }
 
 /* =========================================================
@@ -2621,6 +2765,43 @@ async function handleSessionText(message, session, env) {
         reply_markup:{inline_keyboard:[[ {text:"📂 Categories",callback_data:"admin_list_categories"} ]]}
       });
       return true;
+    }
+
+    case "setting_value": {
+      const value = String(message.text || "").trim();
+      if (!value) { await sendMessage(chatId, "❌ Value cannot be empty.", env); return true; }
+      await saveSetting(session.setting_key, value, env);
+      await clearSession(chatId, env);
+      await sendMessage(chatId, "✅ Website setting updated.", env, { reply_markup: { inline_keyboard: [[{ text: "🌐 Website Settings", callback_data: "admin_website" }]] } });
+      return true;
+    }
+
+    case "task_type": {
+      const type = String(message.text || "").trim().toLowerCase();
+      if (!["channel", "group", "referral", "website", "custom"].includes(type)) { await sendMessage(chatId, "❌ Use channel, group, referral, website, or custom.", env); return true; }
+      await updateSession(env, chatId, { step: "task_title", task_type: type });
+      await sendMessage(chatId, "<b>Step 2/4</b>\n\nSend the task title.", env); return true;
+    }
+
+    case "task_title": {
+      const title = String(message.text || "").trim();
+      if (!title) { await sendMessage(chatId, "❌ Title cannot be empty.", env); return true; }
+      await updateSession(env, chatId, { step: "task_url", task_title: title });
+      await sendMessage(chatId, "<b>Step 3/4</b>\n\nSend task URL or type <code>skip</code>.", env); return true;
+    }
+
+    case "task_url": {
+      const raw = String(message.text || "").trim();
+      await updateSession(env, chatId, { step: "task_count", task_url: raw.toLowerCase() === "skip" ? null : raw });
+      await sendMessage(chatId, "<b>Step 4/4</b>\n\nSend referral required count (number) or type <code>1</code>.", env); return true;
+    }
+
+    case "task_count": {
+      const count = Math.max(1, Number(message.text || 1) || 1);
+      const body = { product_id: session.task_product_id, task_type: session.task_type, title: session.task_title, description: "", task_url: session.task_url || null, channel_id: session.task_type === "channel" || session.task_type === "group" ? session.task_url : null, required_count: count, sort_order: 0, status: "active", required: true };
+      await sbInsert(env, "product_tasks", body);
+      await clearSession(chatId, env);
+      await sendMessage(chatId, "✅ Task added successfully.", env, { reply_markup: { inline_keyboard: [[{ text: "📋 View Tasks", callback_data: `admin_task_list:${session.task_product_id}` }]] } }); return true;
     }
 
     case "product_upload":
@@ -3188,3 +3369,56 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+
+/* =========================================================
+   SEO STOREFRONT
+========================================================= */
+
+async function siteOrigin(request, env) {
+  const configured = await getSetting(env, "website_url");
+  if (configured && /^https?:\/\//i.test(configured)) return configured.replace(/\/$/, "");
+  const host = request?.headers?.get("host") || "pdforbits.blogspot.com";
+  const proto = request?.headers?.get("x-forwarded-proto") || "https";
+  return `${proto}://${host}`;
+}
+
+function pageShell(title, description, canonical, body) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><link rel="canonical" href="${escapeHtml(canonical)}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:type" content="website"><style>body{margin:0;background:#f6f7fb;color:#172033;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}a{color:inherit;text-decoration:none}.wrap{max-width:1100px;margin:auto;padding:28px 18px}.hero{background:linear-gradient(135deg,#101936,#3859d6);color:#fff;border-radius:24px;padding:38px 28px;margin-bottom:26px}.hero h1{font-size:clamp(30px,6vw,58px);margin:0 0 10px}.hero p{max-width:680px;opacity:.9;font-size:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px}.card{background:#fff;border-radius:18px;padding:20px;box-shadow:0 8px 26px #25315d12;border:1px solid #e8ebf3}.card h2{margin:4px 0 10px;font-size:21px}.muted{color:#65708a;line-height:1.6}.pill{display:inline-block;background:#eef1ff;color:#304ac7;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:700}.btn{display:inline-block;background:#3859d6;color:#fff;padding:11px 16px;border-radius:10px;font-weight:700;margin-top:12px}.nav{display:flex;gap:14px;flex-wrap:wrap;margin:16px 0 24px;color:#3859d6;font-weight:700}.cover{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:14px;background:#e9edff}.empty{padding:44px;text-align:center;background:#fff;border-radius:18px}.footer{margin-top:42px;color:#73809a;font-size:14px}</style></head><body><main class="wrap">${body}</main></body></html>`;
+}
+
+function websiteResponse(html, status=200, type="text/html; charset=utf-8") { return new Response(html, { status, headers: { "Content-Type": type, "Cache-Control": "public, max-age=120" } }); }
+
+async function websiteHome(request, env) {
+  const origin = await siteOrigin(request, env);
+  const name = await getSetting(env, "site_name") || "PDF ORBIT";
+  const desc = await getSetting(env, "site_description") || "Discover free PDFs, books, notes and study materials.";
+  const [products, categories] = await Promise.all([
+    sb(env, "products", { select: "product_id,title,description,cover_image,category_id,product_type", filter: [{ column: "status", operator: "eq", value: "active" }], order: "created_at.desc", limit: 30 }),
+    sb(env, "categories", { select: "id,name,slug,description", filter: [{ column: "status", operator: "eq", value: "active" }], order: "name.asc", limit: 30 })
+  ]);
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
+  const cards = products.map(p => { const c = catMap[p.category_id]; const url = `${origin}/p/${slugify(c?.slug || "library")}/${slugify(p.title)}/${encodeURIComponent(p.product_id)}`; return `<article class="card">${p.cover_image ? `<img class="cover" src="${escapeHtml(p.cover_image)}" alt="${escapeHtml(p.title)} cover">` : ""}<span class="pill">${escapeHtml(p.product_type || "PDF")}</span><h2><a href="${escapeHtml(url)}">${escapeHtml(p.title)}</a></h2><p class="muted">${escapeHtml((p.description || "Download this PDF from PDF ORBIT.").substring(0, 150))}</p><a class="btn" href="${escapeHtml(url)}">View PDF</a></article>`; }).join("");
+  const cats = categories.map(c => `<a class="card" href="${origin}/category/${encodeURIComponent(c.slug)}"><span class="pill">CATEGORY</span><h2>${escapeHtml(c.name)}</h2><p class="muted">${escapeHtml(c.description || "Browse PDFs in this category.")}</p></a>`).join("");
+  return websiteResponse(pageShell(name, desc, origin, `<section class="hero"><h1>${escapeHtml(name)}</h1><p>${escapeHtml(desc)}</p><a class="btn" href="#latest">Browse latest PDFs</a></section><nav class="nav"><a href="${origin}/">Home</a><a href="#categories">Categories</a><a href="${origin}/sitemap.xml">Sitemap</a></nav><section id="categories"><h2>Explore Categories</h2><div class="grid">${cats || '<div class="empty">Categories coming soon.</div>'}</div></section><section id="latest"><h2>Latest PDFs</h2><div class="grid">${cards || '<div class="empty">New PDFs are coming soon.</div>'}</div></section><p class="footer">Free study resources and PDF downloads. Updated automatically from the library.</p>`));
+}
+
+async function websiteCategory(request, env, slug) {
+  const origin = await siteOrigin(request, env);
+  const cats = await sb(env, "categories", { select: "id,name,slug,description", filter: [{ column: "slug", operator: "eq", value: slug }, { column: "status", operator: "eq", value: "active" }], limit: 1 });
+  if (!cats.length) return websiteResponse(pageShell("Category not found", "This category does not exist.", `${origin}/category/${encodeURIComponent(slug)}`, `<div class="empty"><h1>Category not found</h1><a class="btn" href="${origin}/">Back home</a></div>`), 404);
+  const c = cats[0]; const products = await sb(env, "products", { select: "product_id,title,description,cover_image,product_type", filter: [{ column: "category_id", operator: "eq", value: c.id }, { column: "status", operator: "eq", value: "active" }], order: "created_at.desc", limit: 100 });
+  const cards = products.map(p => { const url = `${origin}/p/${slugify(c.slug)}/${slugify(p.title)}/${encodeURIComponent(p.product_id)}`; return `<article class="card"><span class="pill">${escapeHtml(p.product_type || "PDF")}</span><h2><a href="${url}">${escapeHtml(p.title)}</a></h2><p class="muted">${escapeHtml(p.description || "")}</p><a class="btn" href="${url}">View details</a></article>`; }).join("");
+  return websiteResponse(pageShell(`${c.name} PDFs`, c.description || `PDFs in ${c.name}`, `${origin}/category/${encodeURIComponent(c.slug)}`, `<nav class="nav"><a href="${origin}/">← Home</a></nav><section class="hero"><h1>${escapeHtml(c.name)}</h1><p>${escapeHtml(c.description || "Browse all PDFs in this category.")}</p></section><div class="grid">${cards || '<div class="empty">No PDFs in this category yet.</div>'}</div>`));
+}
+
+async function websiteProduct(request, env, route) {
+  const origin = await siteOrigin(request, env);
+  const id = route.split("/").pop();
+  const rows = await sb(env, "products", { select: "product_id,title,description,cover_image,category_id,product_type,file_name", filter: [{ column: "product_id", operator: "eq", value: id }, { column: "status", operator: "eq", value: "active" }], limit: 1 });
+  if (!rows.length) return websiteResponse(pageShell("PDF not found", "This PDF is unavailable.", `${origin}/p/${route}`, `<div class="empty"><h1>PDF not found</h1><a class="btn" href="${origin}/">Back home</a></div>`), 404);
+  const p = rows[0]; const cats = p.category_id ? await sb(env, "categories", { select: "name,slug", filter: [{ column: "id", operator: "eq", value: p.category_id }], limit: 1 }) : []; const c = cats[0]; const canonical = `${origin}/p/${slugify(c?.slug || "library")}/${slugify(p.title)}/${encodeURIComponent(p.product_id)}`; const cover = p.cover_image ? `<img class="cover" src="${escapeHtml(p.cover_image)}" alt="${escapeHtml(p.title)} cover">` : ""; const schema = { "@context": "https://schema.org", "@type": "Article", headline: p.title, description: p.description || "", url: canonical, image: p.cover_image || undefined };
+  return websiteResponse(pageShell(`${p.title} | PDF ORBIT`, p.description || `Download ${p.title} PDF`, canonical, `<nav class="nav"><a href="${origin}/">← Home</a>${c ? `<a href="${origin}/category/${encodeURIComponent(c.slug)}">${escapeHtml(c.name)}</a>` : ""}</nav><article class="card">${cover}<span class="pill">${escapeHtml(p.product_type || "PDF")}</span><h1>${escapeHtml(p.title)}</h1><p class="muted">${escapeHtml(p.description || "This PDF is available through the PDF ORBIT Telegram bot.")}</p><a class="btn" href="https://t.me/${escapeHtml((await getSetting(env, "telegram_username") || "pdforbit").replace(/^@/, ""))}">Get this PDF on Telegram</a></article><script type="application/ld+json">${JSON.stringify(schema)}</script>`));
+}
+
+async function websiteSitemap(request, env) { const origin = await siteOrigin(request, env); const [products, cats] = await Promise.all([sb(env, "products", { select: "product_id,title,category_id,updated_at", filter: [{ column: "status", operator: "eq", value: "active" }], limit: 5000 }), sb(env, "categories", { select: "id,slug", filter: [{ column: "status", operator: "eq", value: "active" }], limit: 500 })]); const map = Object.fromEntries(cats.map(c => [c.id, c.slug])); const urls = [`<url><loc>${origin}/</loc></url>`, ...cats.map(c => `<url><loc>${origin}/category/${encodeURIComponent(c.slug)}</loc></url>`), ...products.map(p => `<url><loc>${origin}/p/${slugify(map[p.category_id] || "library")}/${slugify(p.title)}/${encodeURIComponent(p.product_id)}</loc><lastmod>${new Date(p.updated_at || Date.now()).toISOString()}</lastmod></url>`)].join(""); return websiteResponse(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`, 200, "application/xml; charset=utf-8"); }
+async function websiteRobots(request, env) { const origin = await siteOrigin(request, env); return websiteResponse(`User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`, 200, "text/plain; charset=utf-8"); }
