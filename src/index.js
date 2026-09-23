@@ -1958,7 +1958,7 @@ async function handleProductUpload(message, session, env) {
   } else if (message.video) {
     const v = message.video;
     await updateSession(env, chatId, { step:"product_id", telegram_file_id:v.file_id, file_name:v.file_name || "video.mp4", file_size:v.file_size || null, mime_type:v.mime_type || "video/mp4", media_type:"video" });
-  } else if (/^https?:\\/\\//i.test(urlText)) {
+  } else if (/^https?:\/\//i.test(urlText)) {
     await updateSession(env, chatId, { step:"product_id", telegram_file_id:null, file_name:null, file_size:null, mime_type:"text/uri-list", media_type:"link", external_url:urlText });
   } else {
     await sendMessage(chatId, "❌ Send a PDF/document, video, or valid http(s) link.", env);
