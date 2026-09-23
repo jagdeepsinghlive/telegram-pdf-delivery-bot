@@ -704,7 +704,7 @@ function mainKeyboard(chatId, env) {
   const rows = [
     [
       { text: "📚 Latest PDFs", callback_data: "latest_products" },
-      { text: "🔎 Search", callback_data: "search_products" }
+      { text: "🔎 Search PDF", url: "https://pdforbits.blogspot.com/" }
     ],
     [
       { text: "📂 Categories", callback_data: "categories" },
@@ -1371,12 +1371,18 @@ async function handleCallback(query, env) {
     const website = await getSetting(env, "website_url");
     await sendMessage(chatId, "<b>✨ More Options</b>\n\nChoose an option:", env, {
       reply_markup:{inline_keyboard:[
+        [{text:"🔎 Search PDF Website",url:"https://pdforbits.blogspot.com/"}],
         [{text:"📚 Latest PDFs",callback_data:"latest_products"}],
         [{text:"📂 Categories",callback_data:"categories"}],
         ...(website ? [[{text:"🌐 Website",url:website}]] : []),
         [{text:"👨‍💻 Contact Admin",callback_data:"contact_admin"}]
       ]}
     });
+    return;
+  }
+
+  if (data.startsWith("cat:")) {
+    await showCategoryProducts(chatId, Number(data.substring("cat:".length)), env);
     return;
   }
 
@@ -1657,6 +1663,58 @@ async function categoriesMenu(chatId, env) {
         inline_keyboard: keyboard
       }
     }
+  );
+}
+
+/* =========================================================
+   USER CATEGORY BROWSING
+========================================================= */
+
+async function showCategoryProducts(chatId, categoryId, env) {
+  const cats = await sb(env, "categories", {
+    select: "id,name,description,status",
+    filter: [
+      { column: "id", operator: "eq", value: categoryId },
+      { column: "status", operator: "eq", value: "active" }
+    ],
+    limit: 1
+  });
+
+  if (!cats.length) {
+    await sendMessage(chatId, "❌ Category not found.", env);
+    return;
+  }
+
+  const products = await sb(env, "products", {
+    select: "id,product_id,title,description,product_type,status,price",
+    filter: [
+      { column: "category_id", operator: "eq", value: categoryId },
+      { column: "status", operator: "eq", value: "active" }
+    ],
+    order: "created_at.desc",
+    limit: 30
+  });
+
+  if (!products.length) {
+    await sendMessage(chatId,
+      "📂 <b>" + escapeHtml(cats[0].name) + "</b>\n\nNo PDFs in this category yet.",
+      env,
+      { reply_markup: { inline_keyboard: [[{text:"🔙 Categories",callback_data:"categories"}]] } }
+    );
+    return;
+  }
+
+  const buttons = products.map(p => [
+    { text: "📄 " + String(p.title || "PDF").substring(0, 45), callback_data: "open_product:" + p.product_id }
+  ]);
+  buttons.push([{text:"🔙 Categories",callback_data:"categories"}]);
+
+  await sendMessage(chatId,
+    "📂 <b>" + escapeHtml(cats[0].name) + "</b>\n\n" +
+    escapeHtml(cats[0].description || "") +
+    "\n\n📚 PDFs: <b>" + products.length + "</b>",
+    env,
+    { reply_markup: { inline_keyboard: buttons } }
   );
 }
 
@@ -2160,20 +2218,15 @@ async function adminProductList(chatId, env) {
 
 ID: <code>${escapeHtml(p.product_id)}</code>
 Type: ${escapeHtml(p.product_type || "pdf")}
-Status: ${escapeHtml(p.status)}`,
+Status: ${escapeHtml(p.status)}\nPrice: <b>FREE</b>`,
       env,
       {
         reply_markup: {
           inline_keyboard: [
             [
-              {
-                text: "✏️ Edit",
-                callback_data: `edit_product:${p.product_id}`
-              },
-              {
-                text: "🗑 Delete",
-                callback_data: `delete_product:${p.product_id}`
-              }
+              { text: "ℹ️ Info", callback_data: `product_info:${p.product_id}` },
+              { text: "✏️ Edit", callback_data: `edit_product:${p.product_id}` },
+              { text: "🗑 Delete", callback_data: `delete_product:${p.product_id}` }
             ]
           ]
         }
