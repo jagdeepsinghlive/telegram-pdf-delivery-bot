@@ -714,6 +714,13 @@ function mainKeyboard(chatId, env) {
     ]
   ];
 
+  // Show Admin Panel to the configured owner/admin ID.
+  if (String(chatId) === String(env.ADMIN_TELEGRAM_ID)) {
+    rows.push([
+      { text: "👑 Admin Panel", callback_data: "admin_panel" }
+    ]);
+  }
+
   return {
     reply_markup: {
       inline_keyboard: rows
