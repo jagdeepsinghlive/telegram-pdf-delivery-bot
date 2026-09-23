@@ -101,6 +101,19 @@ export default {
         return await apiProduct(env, productId);
       }
 
+      // Web Admin Panel
+      if (request.method === "GET" && url.pathname === "/admin") {
+        return await adminPanelPage(request, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/admin/login") {
+        return await adminLogin(request, env);
+      }
+
+      if (url.pathname.startsWith("/api/admin/")) {
+        return await adminApi(request, env, url);
+      }
+
       // Telegram webhook
       if (request.method === "POST" && url.pathname === "/") {
         const secret = env.WEBHOOK_SECRET;
@@ -3454,6 +3467,133 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+
+/* =========================================================
+   WEB ADMIN PANEL
+========================================================= */
+
+async function adminPanelPage(request, env) {
+  const token = await adminCookie(request, env);
+  if (!token) {
+    return html(ADMIN_LOGIN_HTML);
+  }
+  return html(ADMIN_PANEL_HTML);
+}
+
+async function adminLogin(request, env) {
+  try {
+    const body = await request.json();
+    const password = String(body?.password || "");
+    const expected = String(env.ADMIN_PANEL_PASSWORD || "");
+    if (!expected || password !== expected) return json({ ok: false, error: "Invalid password" }, 401);
+    const token = await makeAdminToken(env, Date.now());
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Set-Cookie": "po_admin=" + token + "; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400",
+        ...corsHeaders()
+      }
+    });
+  } catch (e) {
+    return json({ ok: false, error: e?.message || "Login failed" }, 400);
+  }
+}
+
+async function adminApi(request, env, url) {
+  if (!(await adminCookie(request, env))) return json({ ok: false, error: "Unauthorized" }, 401);
+  const path = url.pathname.substring("/api/admin/".length);
+  if (request.method === "GET" && path === "data") return await adminData(env);
+  if (request.method === "POST" && path === "save") return await adminSave(request, env);
+  if (request.method === "POST" && path === "delete") return await adminDelete(request, env);
+  if (request.method === "POST" && path === "logout") return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json", "Set-Cookie": "po_admin=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0", ...corsHeaders() } });
+  return json({ ok: false, error: "Admin endpoint not found" }, 404);
+}
+
+async function adminData(env) {
+  const [products, posts, categories, links, admins, settings] = await Promise.all([
+    sb(env,"products",{select:"*",order:"created_at.desc",limit:500}),
+    sb(env,"posts",{select:"*",order:"created_at.desc",limit:500}),
+    sb(env,"categories",{select:"*",order:"created_at.desc",limit:200}),
+    sb(env,"site_links",{select:"*",order:"sort_order.asc",limit:200}),
+    sb(env,"admins",{select:"*",order:"created_at.desc",limit:200}),
+    sb(env,"settings",{select:"key,value",order:"key.asc",limit:200})
+  ]);
+  return json({ok:true,products,posts,categories,links,admins,settings});
+}
+
+function adminAllowedTable(table) {
+  return ["products","posts","categories","site_links","admins","settings"].includes(table);
+}
+
+async function adminSave(request, env) {
+  const body = await request.json();
+  const table = String(body?.table || "");
+  const id = body?.id;
+  const data = body?.data && typeof body.data === "object" ? {...body.data} : {};
+  if (!adminAllowedTable(table)) return json({ok:false,error:"Table not allowed"},400);
+  delete data.id;
+  if (table === "settings") {
+    const key = String(data.key || "");
+    if (!key) return json({ok:false,error:"Setting key required"},400);
+    const existing = await sb(env,"settings",{select:"id",filter:[{column:"key",operator:"eq",value:key}],limit:1});
+    if (existing.length) await sbUpdate(env,"settings",[{column:"id",operator:"eq",value:existing[0].id}],{value:String(data.value ?? "")});
+    else await sbInsert(env,"settings",{key,value:String(data.value ?? "")});
+    return json({ok:true});
+  }
+  if (id) await sbUpdate(env,table,[{column:"id",operator:"eq",value:id}],data);
+  else await sbInsert(env,table,data);
+  return json({ok:true});
+}
+
+async function adminDelete(request, env) {
+  const body = await request.json();
+  const table = String(body?.table || "");
+  const id = body?.id;
+  if (!adminAllowedTable(table) || !id) return json({ok:false,error:"Invalid delete request"},400);
+  await sbDelete(env,table,[{column:"id",operator:"eq",value:id}]);
+  return json({ok:true});
+}
+
+async function adminCookie(request, env) {
+  const cookie = request.headers.get("Cookie") || "";
+  const match = cookie.match(/(?:^|;\\s*)po_admin=([^;]+)/);
+  if (!match || !env.ADMIN_PANEL_PASSWORD) return null;
+  const token = decodeURIComponent(match[1]);
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const ts = Number(parts[0]);
+  if (!Number.isFinite(ts) || Date.now() - ts > 86400000) return null;
+  const expected = await makeAdminToken(env, ts);
+  return token === expected ? token : null;
+}
+
+async function makeAdminToken(env, timestamp) {
+  const data = String(timestamp);
+  const key = await crypto.subtle.importKey("raw",new TextEncoder().encode(String(env.ADMIN_PANEL_PASSWORD || "")),{name:"HMAC",hash:"SHA-256"},false,["sign"]);
+  const sig = await crypto.subtle.sign("HMAC",key,new TextEncoder().encode(data));
+  const bytes = new Uint8Array(sig);
+  let out = "";
+  for (const b of bytes) out += b.toString(16).padStart(2,"0");
+  return data+"."+out;
+}
+
+const ADMIN_LOGIN_HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PDF ORBIT Admin Login</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f6fb;font-family:Inter,system-ui}.box{width:min(400px,calc(100% - 32px));background:#fff;padding:30px;border-radius:22px;box-shadow:0 20px 60px #17203318}h1{margin-top:0}input,button{width:100%;box-sizing:border-box;padding:14px;border-radius:12px;border:1px solid #dce1ea;font-size:16px;margin-top:10px}button{background:#3157d5;color:#fff;border:0;font-weight:800;cursor:pointer}.err{color:#c62828;margin-top:12px}</style></head><body><form class="box" id="f"><h1>🔐 PDF ORBIT</h1><p>Admin Panel Login</p><input id="p" type="password" placeholder="Admin password" required><button>Login</button><div class="err" id="e"></div></form><script>f.onsubmit=async e=>{e.preventDefault();const r=await fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p.value})});const j=await r.json();if(j.ok)location.href='/admin';else document.querySelector('#e').textContent=j.error||'Login failed'}</script></body></html>`;
+
+const ADMIN_PANEL_HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PDF ORBIT Admin</title><style>*{box-sizing:border-box}body{margin:0;background:#f5f7fb;color:#182033;font-family:Inter,system-ui,sans-serif}.app{display:flex;min-height:100vh}.side{width:230px;background:#101936;color:#fff;padding:22px 14px;position:fixed;inset:0 auto 0 0}.side h2{margin:0 8px 22px}.side button{display:block;width:100%;border:0;background:transparent;color:#dce3ff;text-align:left;padding:12px;border-radius:10px;cursor:pointer;margin:4px 0}.side button.active,.side button:hover{background:#2e4fc4;color:#fff}.main{margin-left:230px;padding:25px;width:calc(100% - 230px)}.top{display:flex;justify-content:space-between;align-items:center;gap:10px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:20px 0}.stat,.panel{background:#fff;border:1px solid #e6eaf1;border-radius:16px;padding:18px;box-shadow:0 8px 25px #17203308}.stat b{font-size:28px}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}input,textarea,select{width:100%;padding:11px;border:1px solid #dce1ea;border-radius:10px;background:#fff}textarea{min-height:120px}.btn{border:0;border-radius:10px;padding:10px 14px;background:#3157d5;color:#fff;font-weight:800;cursor:pointer}.btn.danger{background:#c62828}.btn.gray{background:#667085}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.item{border:1px solid #e6eaf1;border-radius:14px;padding:14px}.item h3{margin:0 0 6px}.muted{color:#667085;font-size:13px}.modal{position:fixed;inset:0;background:#0008;display:none;place-items:center;padding:15px}.modal.open{display:grid}.modalbox{background:#fff;width:min(760px,100%);max-height:92vh;overflow:auto;border-radius:18px;padding:20px}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field{margin:9px 0}.field label{font-size:12px;font-weight:800;display:block;margin-bottom:5px}.wide{grid-column:1/-1}@media(max-width:800px){.side{width:70px;padding:10px 7px}.side h2{font-size:0}.side h2:after{content:'PO';font-size:18px}.side button{font-size:0;text-align:center}.side button:before{content:'•';font-size:20px}.main{margin-left:70px;width:calc(100% - 70px);padding:15px}.stats{grid-template-columns:1fr 1fr}.grid,.row{grid-template-columns:1fr}.top h1{font-size:22px}}</style></head><body><div class="app"><aside class="side"><h2>PDF ORBIT</h2><button data-tab="dashboard">📊 Dashboard</button><button data-tab="products">📦 Products</button><button data-tab="posts">📝 Posts</button><button data-tab="categories">📂 Categories</button><button data-tab="links">🔗 Links & Tasks</button><button data-tab="admins">👑 Admins</button><button data-tab="settings">⚙️ Settings</button><button id="logout">🚪 Logout</button></aside><main class="main"><div class="top"><h1 id="title">Dashboard</h1><button class="btn" id="add">＋ Add</button></div><div id="view"></div></main></div><div class="modal" id="modal"><div class="modalbox"><div class="top"><h2 id="mt">Edit</h2><button class="btn gray" onclick="closeModal()">Close</button></div><form id="form"></form></div></div><script>
+let D={},tab='dashboard',editId=null;
+const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+async function load(){const r=await fetch('/api/admin/data');if(r.status===401){location.href='/admin';return}D=await r.json();render()}
+function render(){document.querySelectorAll('.side button[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));document.querySelector('#title').textContent=tab[0].toUpperCase()+tab.slice(1);const v=document.querySelector('#view');if(tab==='dashboard'){v.innerHTML='<div class="stats">'+[['Products',D.products?.length],['Posts',D.posts?.length],['Categories',D.categories?.length],['Admins',D.admins?.length]].map(x=>'<div class="stat"><div>'+x[0]+'</div><b>'+x[1]+'</b></div>').join('')+'</div><div class="panel"><h2>Quick Management</h2><p class="muted">Manage products, posts, categories, links, admins and SEO settings from this panel.</p></div>';return}const rows=D[tab==='links'?'links':tab]||[];v.innerHTML='<div class="toolbar"><button class="btn" onclick="newItem()">＋ Create New</button><button class="btn gray" onclick="load()">↻ Refresh</button></div><div class="grid">'+rows.map(itemCard).join('')+'</div>'}
+function itemCard(x){const title=x.title||x.name||x.key||x.product_id||x.post_id||x.telegram_user_id||'Item';const sub=x.slug||x.description||x.role||x.value||x.url||x.link_type||'';return '<div class="item"><h3>'+esc(title)+'</h3><div class="muted">'+esc(sub).slice(0,220)+'</div><div class="toolbar"><button class="btn" onclick="edit(\\''+esc(x.id||'')+'\\',\\''+encodeURIComponent(JSON.stringify(x))+'\\')">Edit</button><button class="btn danger" onclick="delItem(\\''+esc(x.id||'')+'\\')">Delete</button></div></div>'}
+function fieldsFor(x){if(tab==='products')return [['title','Title'],['description','Description','wide'],['price','Price'],['product_type','Product type'],['media_type','Media type'],['category_id','Category ID'],['slug','Slug'],['cover_image','Thumbnail URL'],['telegram_file_id','Telegram File ID'],['file_name','File name'],['external_url','External URL'],['content_html','HTML content','wide'],['seo_title','SEO title'],['seo_description','SEO description','wide'],['faq_json','FAQ JSON','wide'],['status','Status'],['noindex','Noindex']];if(tab==='posts')return [['title','Title'],['category_id','Category ID'],['slug','Slug'],['excerpt','Excerpt','wide'],['content_html','HTML content','wide'],['thumbnail_url','Thumbnail URL'],['seo_title','SEO title'],['seo_description','SEO description','wide'],['faq_json','FAQ JSON','wide'],['status','Status'],['noindex','Noindex']];if(tab==='categories')return [['name','Name'],['slug','Slug'],['description','Description','wide'],['image_url','Image URL'],['seo_title','SEO title'],['seo_description','SEO description','wide'],['status','Status'],['noindex','Noindex']];if(tab==='links')return [['title','Title'],['url','URL','wide'],['link_type','Link type'],['placement','Placement'],['sort_order','Sort order'],['status','Status']];if(tab==='admins')return [['telegram_user_id','Telegram User ID'],['name','Name'],['role','Role'],['status','Status']];return [['key','Setting key'],['value','Value','wide']];}
+function edit(id,encoded){editId=id||null;const x=encoded?JSON.parse(decodeURIComponent(encoded)):{};document.querySelector('#mt').textContent=editId?'Edit':'Create';document.querySelector('#form').innerHTML='<div class="row">'+fieldsFor(x).map(f=>'<div class="field '+(f[2]||'')+'"><label>'+f[1]+'</label><textarea data-k="'+f[0]+'" '+(f[0]==='content_html'||f[0]==='description'||f[0]==='faq_json'||f[0]==='seo_description'||f[0]==='value'?'':'style="min-height:44px"')+'>'+esc(x[f[0]]??'')+'</textarea></div>').join('')+'</div><div class="toolbar"><button class="btn">Save</button></div>';document.querySelector('#modal').classList.add('open');document.querySelector('#form').onsubmit=save}
+function newItem(){edit('',encodeURIComponent('{}'))}
+async function save(e){e.preventDefault();const data={};document.querySelectorAll('#form [data-k]').forEach(el=>data[el.dataset.k]=el.value);if(data.noindex!==undefined)data.noindex=['true','1','yes','on'].includes(String(data.noindex).toLowerCase());const r=await fetch('/api/admin/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({table:tab==='links'?'site_links':tab,id:editId,data})});const j=await r.json();if(!j.ok)return alert(j.error||'Save failed');closeModal();await load()}
+async function delItem(id){if(!id||!confirm('Delete this item?'))return;const r=await fetch('/api/admin/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({table:tab==='links'?'site_links':tab,id})});const j=await r.json();if(!j.ok)alert(j.error||'Delete failed');await load()}
+function closeModal(){document.querySelector('#modal').classList.remove('open')}
+document.querySelectorAll('.side button[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;render()});document.querySelector('#add').onclick=newItem;document.querySelector('#logout').onclick=async()=>{await fetch('/api/admin/logout',{method:'POST'});location.href='/admin'};load();
+</script></body></html>`;
 
 /* =========================================================
    SEO STOREFRONT
