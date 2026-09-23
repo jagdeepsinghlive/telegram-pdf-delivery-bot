@@ -2635,6 +2635,11 @@ Use the buttons below to update the public storefront.`,
           [{ text: "✏️ Site Name", callback_data: "edit_setting:site_name" }],
           [{ text: "✏️ Site Description", callback_data: "edit_setting:site_description" }],
           [{ text: "✏️ Website URL", callback_data: "edit_setting:website_url" }],
+          [{ text: "👤 User Panel URL", callback_data: "edit_setting:user_panel_url" }],
+          [{ text: "👑 Admin Panel URL", callback_data: "edit_setting:admin_panel_url" }],
+          [{ text: "📱 Telegram Username", callback_data: "edit_setting:telegram_username" }],
+          [{ text: "▶️ YouTube URL", callback_data: "edit_setting:youtube_url" }],
+          [{ text: "📸 Instagram URL", callback_data: "edit_setting:instagram_url" }],
           [{ text: "✏️ Contact Admin", callback_data: "edit_setting:contact_admin" }],
           [{ text: "🔙 Admin Panel", callback_data: "back_admin" }]
         ]
@@ -2644,7 +2649,7 @@ Use the buttons below to update the public storefront.`,
 }
 
 async function startEditSetting(chatId, key, env) {
-  const allowed = ["site_name", "site_description", "website_url", "contact_admin"];
+  const allowed = ["site_name", "site_description", "website_url", "user_panel_url", "admin_panel_url", "telegram_username", "youtube_url", "instagram_url", "contact_admin"];
   if (!allowed.includes(key)) return;
   await setSession(env, chatId, {
     step: "setting_value",
