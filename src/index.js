@@ -63,6 +63,10 @@ export default {
         return await apiSettings(env);
       }
 
+      if (request.method === "GET" && url.pathname === "/api/posts") {
+        return await apiPosts(env);
+      }
+
       if (request.method === "GET" && url.pathname.startsWith("/category/")) {
         return await websiteCategory(request, env, decodeURIComponent(url.pathname.substring(9)));
       }
@@ -73,6 +77,10 @@ export default {
 
       if (request.method === "GET" && url.pathname.startsWith("/p/")) {
         return await websiteProduct(request, env, decodeURIComponent(url.pathname.substring(3)));
+      }
+
+      if (request.method === "GET" && url.pathname.startsWith("/post/")) {
+        return await websitePost(request, env, decodeURIComponent(url.pathname.substring(6)));
       }
 
       if (request.method === "GET" && url.pathname === "/api/search") {
@@ -274,7 +282,7 @@ async function sbDelete(env, table, filter) {
 async function apiProducts(env) {
   const rows = await sb(env, "products", {
     select:
-      "id,product_id,title,description,price,file_name,file_size,mime_type,cover_image,category_id,status,product_type,created_at,updated_at",
+      "id,product_id,title,description,price,file_name,file_size,mime_type,cover_image,category_id,status,product_type,created_at,updated_at,slug,seo_title,seo_description,content_html,faq_json,external_url,media_type,noindex",
     filter: [
       { column: "status", operator: "eq", value: "active" }
     ],
@@ -297,6 +305,9 @@ async function apiCategories(env) {
   return json(rows);
 }
 
+async function apiPosts(env) {
+  return json(await sb(env,"posts",{select:"post_id,title,slug,excerpt,thumbnail_url,category_id,created_at,updated_at",filter:[{column:"status",operator:"eq",value:"active"}],order:"created_at.desc",limit:100}));
+}
 async function apiSettings(env) {
   const rows = await sb(env, "settings", {
     select: "key,value",
@@ -626,6 +637,21 @@ async function handleMessage(message, env) {
       await startNewProduct(chatId, env);
     }
 
+    return;
+  }
+
+  if (text === "/newpost") {
+    if (await canAdmin(chatId, "product", env)) await startNewPost(chatId, env);
+    return;
+  }
+
+  if (text === "/admins") {
+    if (await isOwner(chatId, env)) await adminAdmins(chatId, env);
+    return;
+  }
+
+  if (text === "/links") {
+    if (await canAdmin(chatId, "product", env)) await adminSiteLinks(chatId, env);
     return;
   }
 
@@ -1281,67 +1307,27 @@ async function checkReferralTask(chatId, task, env) {
 ========================================================= */
 
 async function deliverProduct(chatId, product, env) {
-  // Some older product records may have the file ID missing from the
-  // object passed into delivery. Re-fetch it directly from Supabase.
+  if (product.external_url || product.media_type === "link") {
+    await sendMessage(chatId, "<b>🔗 " + escapeHtml(product.title) + "</b>\n\n" + escapeHtml(product.description || ""), env, { reply_markup:{inline_keyboard:[[ {text:"🌐 Open Link",url:product.external_url} ]] } });
+    await clearSession(chatId, env);
+    return;
+  }
   if (!product.telegram_file_id && product.product_id) {
-    const rows = await sb(env, "products", {
-      select: "telegram_file_id",
-      filter: [
-        { column: "product_id", operator: "eq", value: product.product_id },
-        { column: "status", operator: "eq", value: "active" }
-      ],
-      limit: 1
-    });
-
-    product.telegram_file_id = rows[0]?.telegram_file_id || null;
+    const rows = await sb(env,"products",{select:"telegram_file_id,external_url,media_type",filter:[{column:"product_id",operator:"eq",value:product.product_id},{column:"status",operator:"eq",value:"active"}],limit:1});
+    product.telegram_file_id=rows[0] && rows[0].telegram_file_id || null;
+    product.external_url=rows[0] && rows[0].external_url || product.external_url;
+    product.media_type=rows[0] && rows[0].media_type || product.media_type;
   }
-
-  if (!product.telegram_file_id) {
-    await sendMessage(
-      chatId,
-      "❌ PDF file is not available right now. Please contact admin.",
-      env
-    );
-    return;
-  }
-
-  await sendMessage(
-    chatId,
-    `<b>🎉 PDF Unlocked!</b>
-
-Sending your file now...`,
-    env
-  );
-
-  const result = await sendDocument(
-    chatId,
-    product.telegram_file_id,
-    `<b>${escapeHtml(product.title)}</b>\n\nDelivered by PDF ORBIT.`,
-    env
-  );
-
-  if (!result.ok) {
-    await sendMessage(
-      chatId,
-      "❌ Telegram could not deliver the file. Please contact admin.",
-      env
-    );
-
-    return;
-  }
-
+  if (!product.telegram_file_id) { await sendMessage(chatId,"❌ Media is not available right now. Please contact admin.",env); return; }
+  await sendMessage(chatId,"<b>🎉 Unlocked!</b>\n\nSending your media now...",env);
+  const result = product.media_type === "video"
+    ? await telegram("sendVideo",{chat_id:chatId,video:product.telegram_file_id,caption:"<b>"+escapeHtml(product.title)+"</b>\n\nDelivered by PDF ORBIT.",parse_mode:"HTML"},env)
+    : await sendDocument(chatId,product.telegram_file_id,"<b>"+escapeHtml(product.title)+"</b>\n\nDelivered by PDF ORBIT.",env);
+  if (!result.ok) { await sendMessage(chatId,"❌ Telegram could not deliver this media.",env); return; }
   await recordPurchaseDelivery(chatId, product, env);
-
   await clearSession(chatId, env);
-
-  await sendMessage(
-    chatId,
-    "✅ <b>Delivered successfully.</b>\n\nThank you for using PDF ORBIT.",
-    env,
-    mainKeyboard(chatId, env)
-  );
+  await sendMessage(chatId,"✅ <b>Delivered successfully.</b>",env,mainKeyboard(chatId,env));
 }
-
 async function recordPurchaseDelivery(chatId, product, env) {
   try {
     await sbInsert(env, "purchases", {
@@ -1511,6 +1497,14 @@ async function handleCallback(query, env) {
 
   if (await handleProductCreationCallback(chatId, data, env)) return;
 
+  if (data === "admin_posts") { if (await canAdmin(chatId,"product",env)) await adminPosts(chatId,env); return; }
+  if (data === "admin_add_post") { if (await canAdmin(chatId,"product",env)) await startNewPost(chatId,env); return; }
+  if (data === "admin_admins") { if (await isOwner(chatId,env)) await adminAdmins(chatId,env); return; }
+  if (data === "admin_add_admin") { if (await isOwner(chatId,env)) await startAddAdmin(chatId,env); return; }
+  if (data === "admin_links") { if (await canAdmin(chatId,"product",env)) await adminSiteLinks(chatId,env); return; }
+  if (data === "admin_add_link") { if (await canAdmin(chatId,"product",env)) await startAddSiteLink(chatId,env); return; }
+  if (data.startsWith("delete_admin:")) { if (!isOwner(chatId,env)) return; await sbDelete(env,"admins",[{column:"id",operator:"eq",value:Number(data.substring(13))}]); await adminAdmins(chatId,env); return; }
+  if (data.startsWith("delete_link:")) { if (!(await canAdmin(chatId,"product",env))) return; await sbDelete(env,"site_links",[{column:"id",operator:"eq",value:Number(data.substring(12))}]); await adminSiteLinks(chatId,env); return; }
   /* Admin callbacks */
 
   if (data === "admin_panel") {
@@ -1680,6 +1674,49 @@ async function handleCallback(query, env) {
   }
 }
 
+function isOwner(chatId, env) { return String(chatId) === String(env.ADMIN_TELEGRAM_ID); }
+
+async function startNewPost(chatId, env) {
+  await setSession(env,chatId,{step:"post_title",expires_at:new Date(Date.now()+20*60*1000).toISOString()});
+  await sendMessage(chatId,"<b>📝 Add New Post</b>\n\nStep 1 — Send title.",env);
+}
+
+async function adminPosts(chatId, env) {
+  const posts=await sb(env,"posts",{select:"id,post_id,title,slug,status",order:"created_at.desc",limit:50});
+  let text="<b>📝 Posts</b>\n\n"+(posts.length?posts.map(function(p){return "• <b>"+escapeHtml(p.title)+"</b> — <code>"+escapeHtml(p.slug)+"</code>";}).join("\n"):"No posts yet.");
+  await sendMessage(chatId,text,env,{reply_markup:{inline_keyboard:[[ {text:"➕ Add Post",callback_data:"admin_add_post"} ],[ {text:"🔙 Admin Panel",callback_data:"back_admin"} ]]}});
+}
+
+async function startAddAdmin(chatId, env) { await setSession(env,chatId,{step:"admin_user_id",expires_at:new Date(Date.now()+20*60*1000).toISOString()}); await sendMessage(chatId,"Send Telegram numeric user ID.",env); }
+
+async function adminAdmins(chatId, env) {
+  const rows=await sb(env,"admins",{select:"id,telegram_user_id,name,role,status",order:"created_at.desc",limit:50});
+  const buttons=rows.map(function(a){return [{text:"🗑 "+String(a.name||a.telegram_user_id).substring(0,25),callback_data:"delete_admin:"+a.id}];});
+  buttons.push([{text:"➕ Add Admin",callback_data:"admin_add_admin"}],[{text:"🔙 Admin Panel",callback_data:"back_admin"}]);
+  const text="<b>👑 Administrators</b>\n\n"+rows.map(function(a){return "• <b>"+escapeHtml(a.name||"Admin")+"</b> — <code>"+a.telegram_user_id+"</code> — "+escapeHtml(a.role||"admin");}).join("\n");
+  await sendMessage(chatId,text,env,{reply_markup:{inline_keyboard:buttons}});
+}
+
+async function startAddSiteLink(chatId, env) { await setSession(env,chatId,{step:"link_title",expires_at:new Date(Date.now()+20*60*1000).toISOString()}); await sendMessage(chatId,"Send link title.",env); }
+
+async function adminSiteLinks(chatId, env) {
+  const rows=await sb(env,"site_links",{select:"id,title,url,link_type,status",order:"sort_order.asc",limit:100});
+  const buttons=rows.map(function(a){return [{text:"🗑 "+String(a.title).substring(0,25),callback_data:"delete_link:"+a.id}];});
+  buttons.push([{text:"➕ Add Link",callback_data:"admin_add_link"}],[{text:"🔙 Admin Panel",callback_data:"back_admin"}]);
+  const text="<b>🔗 Site Links</b>\n\n"+rows.map(function(a){return "• <b>"+escapeHtml(a.title)+"</b> — "+escapeHtml(a.url);}).join("\n");
+  await sendMessage(chatId,text,env,{reply_markup:{inline_keyboard:buttons}});
+}
+
+async function publishPost(chatId, session, env) {
+  const slug=slugify(session.post_title);
+  const exists=await sb(env,"posts",{select:"id",filter:[{column:"slug",operator:"eq",value:slug}],limit:1});
+  if(exists.length){await sendMessage(chatId,"❌ Post slug already exists.",env);return true;}
+  const body={post_id:"POST_"+Date.now().toString(36).toUpperCase(),title:session.post_title,slug:slug,category_id:session.post_category_id||null,content_html:session.post_content_html||"",excerpt:String(session.post_content_html||"").replace(/<[^>]*>/g,"").slice(0,180),thumbnail_url:session.post_thumbnail_url||null,thumbnail_file_id:session.post_thumbnail_file_id||null,faq_json:session.post_faq_json||[],seo_title:session.post_seo_title||session.post_title,seo_description:session.post_seo_description||"",status:"active",noindex:false,updated_at:new Date().toISOString()};
+  await sbInsert(env,"posts",body); await clearSession(chatId,env);
+  const origin=await siteOrigin(null,env); await sendMessage(chatId,"<b>✅ Post published</b>\n\n<code>"+escapeHtml(origin+"/post/"+slug)+"</code>",env,{reply_markup:{inline_keyboard:[[ {text:"📝 Posts",callback_data:"admin_posts"} ]]}});
+  return true;
+}
+
 /* =========================================================
    SEARCH
 ========================================================= */
@@ -1818,7 +1855,15 @@ async function adminPanel(chatId, env) {
       {
         text: "🌐 Website",
         callback_data: "admin_website"
+      },
+      {
+        text: "🔗 Site Links",
+        callback_data: "admin_links"
       }
+    ],
+    [
+      { text: "📝 Posts", callback_data: "admin_posts" },
+      { text: "👑 Admins", callback_data: "admin_admins" }
     ],
     [
       {
@@ -1893,42 +1938,22 @@ Send the PDF document now.`,
 
 async function handleProductUpload(message, session, env) {
   const chatId = message.chat.id;
-
-  if (!message.document) {
-    await sendMessage(
-      chatId,
-      "❌ Please send a PDF/document file.",
-      env
-    );
+  const urlText = String(message.text || "").trim();
+  if (message.document) {
+    const d = message.document;
+    await updateSession(env, chatId, { step:"product_id", telegram_file_id:d.file_id, file_name:d.file_name || "document", file_size:d.file_size || null, mime_type:d.mime_type || "application/octet-stream", media_type:"file" });
+  } else if (message.video) {
+    const v = message.video;
+    await updateSession(env, chatId, { step:"product_id", telegram_file_id:v.file_id, file_name:v.file_name || "video.mp4", file_size:v.file_size || null, mime_type:v.mime_type || "video/mp4", media_type:"video" });
+  } else if (/^https?:\\/\\//i.test(urlText)) {
+    await updateSession(env, chatId, { step:"product_id", telegram_file_id:null, file_name:null, file_size:null, mime_type:"text/uri-list", media_type:"link", external_url:urlText });
+  } else {
+    await sendMessage(chatId, "❌ Send a PDF/document, video, or valid http(s) link.", env);
     return true;
   }
-
-  const doc = message.document;
-
-  await updateSession(env, chatId, {
-    step: "product_id",
-    telegram_file_id: doc.file_id,
-    file_name: doc.file_name || "document.pdf",
-    file_size: doc.file_size || null,
-    mime_type: doc.mime_type || "application/pdf"
-  });
-
-  await sendMessage(
-    chatId,
-    `✅ File received: <b>${escapeHtml(doc.file_name || "PDF")}</b>
-
-Step 2/8
-
-Send a unique Product ID.
-
-Example:
-<code>PHY001</code>`,
-    env
-  );
-
+  await sendMessage(chatId, "✅ Media received.\n\nStep 2 — Send a unique Product ID.", env);
   return true;
 }
-
 async function handleProductId(message, session, env) {
   const chatId = message.chat.id;
   const productId = String(message.text || "")
@@ -2050,6 +2075,8 @@ async function handleProductType(message, session, env) {
     "book",
     "notes",
     "pdf",
+    "video",
+    "link",
     "test",
     "study material",
     "other"
@@ -2080,40 +2107,18 @@ async function handleProductType(message, session, env) {
 
 async function handleProductCover(message, session, env) {
   const chatId = message.chat.id;
-  const text = String(message.text || "").trim().toLowerCase();
-
-  if (text === "skip") {
-    await updateSession(env, chatId, {
-      step: "product_preview",
-      cover_image_file_id: null
-    });
-
-    await productPreview(chatId, env);
+  const raw = String(message.text || "").trim();
+  let cover = null;
+  if (message.photo && message.photo.length) cover = message.photo[message.photo.length - 1].file_id;
+  else if (/^https?:\\/\\//i.test(raw)) cover = raw;
+  else if (raw.toLowerCase() !== "skip") {
+    await sendMessage(chatId, "❌ Send a photo, image URL, or skip.", env);
     return true;
   }
-
-  if (message.photo?.length) {
-    const photo =
-      message.photo[message.photo.length - 1];
-
-    await updateSession(env, chatId, {
-      step: "product_preview",
-      cover_image_file_id: photo.file_id
-    });
-
-    await productPreview(chatId, env);
-    return true;
-  }
-
-  await sendMessage(
-    chatId,
-    "❌ Send a photo or type <code>skip</code>.",
-    env
-  );
-
+  await updateSession(env, chatId, { step:"product_content", cover_image_file_id:cover });
+  await sendMessage(chatId, "Step 8 — Send product content. HTML is supported. Type skip.", env);
   return true;
 }
-
 async function productPreview(chatId, env) {
   const session = await getSession(chatId, env);
 
@@ -2233,7 +2238,14 @@ async function publishProduct(chatId, session, env) {
       cover_image: session.cover_image_file_id || null,
       category_id: session.category_id || null,
       status: "active",
-      product_type: session.product_type || "pdf"
+      product_type: session.product_type || "pdf",
+      slug: slugify(session.title),
+      content_html: session.content_html || null,
+      faq_json: session.faq_json || [],
+      external_url: session.external_url || null,
+      media_type: session.media_type || "file",
+      noindex: false,
+      updated_at: new Date().toISOString()
     };
 
     const result = await sbInsert(
@@ -2819,6 +2831,64 @@ async function handleSessionText(message, session, env) {
       await sendMessage(chatId, "✅ Task added successfully.", env, { reply_markup: { inline_keyboard: [[{ text: "📋 View Tasks", callback_data: `admin_task_list:${session.task_product_id}` }]] } }); return true;
     }
 
+    case "product_content": {
+      const raw = String(message.text || "").trim();
+      await updateSession(env, chatId, { step:"product_faq", content_html: raw.toLowerCase() === "skip" ? null : raw });
+      await sendMessage(chatId, "FAQ JSON or Q | A lines, or skip.", env);
+      return true;
+    }
+
+    case "product_faq": {
+      const raw = String(message.text || "").trim();
+      let faq = [];
+      if (raw && raw.toLowerCase() !== "skip") {
+        try { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) faq = parsed; }
+        catch { faq = raw.split("\n").map(function(line){ const p=line.split("|"); return {q:(p[0]||"").trim(),a:(p.slice(1).join("|")||"").trim()}; }).filter(function(x){return x.q && x.a;}); }
+      }
+      await updateSession(env, chatId, { step:"product_preview", faq_json:faq });
+      await productPreview(chatId, env);
+      return true;
+    }
+    case "post_title": {
+      const title=String(message.text||"").trim(); if(!title){await sendMessage(chatId,"❌ Title required.",env);return true;}
+      await updateSession(env,chatId,{step:"post_category",post_title:title});
+      const cats=await sb(env,"categories",{select:"id,name",filter:[{column:"status",operator:"eq",value:"active"}],order:"name.asc"});
+      const kb=cats.map(function(x){return [{text:x.name,callback_data:"select_post_category:"+x.id}];}); kb.push([{text:"Skip Category",callback_data:"select_post_category:0"}]);
+      await sendMessage(chatId,"Step 2 — Choose category.",env,{reply_markup:{inline_keyboard:kb}}); return true;
+    }
+
+    case "post_content": {
+      const raw=String(message.text||"").trim(); await updateSession(env,chatId,{step:"post_thumbnail",post_content_html:raw.toLowerCase()==="skip"?"":raw});
+      await sendMessage(chatId,"Step 4 — Send thumbnail photo or image URL, or skip.",env); return true;
+    }
+
+    case "post_thumbnail": {
+      const raw=String(message.text||"").trim(); let patch={step:"post_faq",post_thumbnail_url:null,post_thumbnail_file_id:null};
+      if(message.photo&&message.photo.length) patch.post_thumbnail_file_id=message.photo[message.photo.length-1].file_id;
+      else if(/^https?:\\/\\//i.test(raw)) patch.post_thumbnail_url=raw;
+      else if(raw.toLowerCase()!=="skip"){await sendMessage(chatId,"❌ Send photo, image URL or skip.",env);return true;}
+      await updateSession(env,chatId,patch); await sendMessage(chatId,"Step 5 — FAQ JSON or Q | A lines, or skip.",env); return true;
+    }
+
+    case "post_faq": {
+      const raw=String(message.text||"").trim(); let faq=[];
+      if(raw&&raw.toLowerCase()!=="skip"){try{const x=JSON.parse(raw);if(Array.isArray(x))faq=x;}catch{faq=raw.split("\n").map(function(line){const p=line.split("|");return{q:(p[0]||"").trim(),a:(p.slice(1).join("|")||"").trim()};}).filter(function(x){return x.q&&x.a;});}}
+      await updateSession(env,chatId,{step:"post_seo_title",post_faq_json:faq}); await sendMessage(chatId,"Step 6 — SEO title or skip.",env); return true;
+    }
+
+    case "post_seo_title": { const raw=String(message.text||"").trim(); await updateSession(env,chatId,{step:"post_seo_description",post_seo_title:raw.toLowerCase()==="skip"?"":raw}); await sendMessage(chatId,"Step 7 — SEO description or skip.",env); return true; }
+    case "post_seo_description": {
+      const raw=String(message.text||"").trim(); await updateSession(env,chatId,{step:"post_preview",post_seo_description:raw.toLowerCase()==="skip"?"":raw});
+      const s=await getSession(chatId,env); await sendMessage(chatId,"<b>👀 Post Preview</b>\n\n<b>"+escapeHtml(s.post_title)+"</b>\nContent: "+(s.post_content_html?"Added":"Skipped")+"\nFAQ: "+((s.post_faq_json||[]).length?"Added":"Skipped")+"\n\nPublish?",env,{reply_markup:{inline_keyboard:[[ {text:"✅ Publish",callback_data:"publish_post"},{text:"❌ Cancel",callback_data:"cancel_post"} ]]}}); return true;
+    }
+
+    case "admin_user_id": { const id=Number(message.text||0); if(!id){await sendMessage(chatId,"❌ Numeric Telegram ID required.",env);return true;} await updateSession(env,chatId,{step:"admin_name",new_admin_user_id:id}); await sendMessage(chatId,"Send admin name.",env); return true; }
+    case "admin_name": { const name=String(message.text||"").trim(); await updateSession(env,chatId,{step:"admin_role",new_admin_name:name}); await sendMessage(chatId,"Role: admin, product_admin, task_admin, or user_admin.",env); return true; }
+    case "admin_role": { const role=String(message.text||"admin").trim().toLowerCase(); if(!["admin","product_admin","task_admin","user_admin"].includes(role)){await sendMessage(chatId,"❌ Invalid role.",env);return true;} await sbInsert(env,"admins",{telegram_user_id:session.new_admin_user_id,name:session.new_admin_name,role,status:"active"}); await clearSession(chatId,env); await adminAdmins(chatId,env); return true; }
+
+    case "link_title": { const title=String(message.text||"").trim(); await updateSession(env,chatId,{step:"link_url",new_link_title:title}); await sendMessage(chatId,"Send full URL.",env); return true; }
+    case "link_url": { const url=String(message.text||"").trim(); if(!/^https?:\\/\\//i.test(url)){await sendMessage(chatId,"❌ Valid http(s) URL required.",env);return true;} await updateSession(env,chatId,{step:"link_type",new_link_url:url}); await sendMessage(chatId,"Type: telegram, website, youtube, instagram or custom.",env); return true; }
+    case "link_type": { const type=String(message.text||"custom").trim().toLowerCase(); if(!["telegram","website","youtube","instagram","custom"].includes(type)){await sendMessage(chatId,"❌ Invalid type.",env);return true;} await sbInsert(env,"site_links",{title:session.new_link_title,url:session.new_link_url,link_type:type,placement:"footer",sort_order:0,status:"active"}); await clearSession(chatId,env); await adminSiteLinks(chatId,env); return true; }
     case "product_upload":
       if (await canAdmin(chatId, "product", env)) {
         return await handleProductUpload(
@@ -3389,51 +3459,12 @@ function escapeHtml(value) {
    SEO STOREFRONT
 ========================================================= */
 
-async function siteOrigin(request, env) {
-  const configured = await getSetting(env, "website_url");
-  if (configured && /^https?:\/\//i.test(configured)) return configured.replace(/\/$/, "");
-  const host = request?.headers?.get("host") || "pdforbits.blogspot.com";
-  const proto = request?.headers?.get("x-forwarded-proto") || "https";
-  return `${proto}://${host}`;
-}
-
-function pageShell(title, description, canonical, body) {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><link rel="canonical" href="${escapeHtml(canonical)}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:type" content="website"><style>body{margin:0;background:#f6f7fb;color:#172033;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}a{color:inherit;text-decoration:none}.wrap{max-width:1100px;margin:auto;padding:28px 18px}.hero{background:linear-gradient(135deg,#101936,#3859d6);color:#fff;border-radius:24px;padding:38px 28px;margin-bottom:26px}.hero h1{font-size:clamp(30px,6vw,58px);margin:0 0 10px}.hero p{max-width:680px;opacity:.9;font-size:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px}.card{background:#fff;border-radius:18px;padding:20px;box-shadow:0 8px 26px #25315d12;border:1px solid #e8ebf3}.card h2{margin:4px 0 10px;font-size:21px}.muted{color:#65708a;line-height:1.6}.pill{display:inline-block;background:#eef1ff;color:#304ac7;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:700}.btn{display:inline-block;background:#3859d6;color:#fff;padding:11px 16px;border-radius:10px;font-weight:700;margin-top:12px}.nav{display:flex;gap:14px;flex-wrap:wrap;margin:16px 0 24px;color:#3859d6;font-weight:700}.cover{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:14px;background:#e9edff}.empty{padding:44px;text-align:center;background:#fff;border-radius:18px}.footer{margin-top:42px;color:#73809a;font-size:14px}</style></head><body><main class="wrap">${body}</main></body></html>`;
-}
-
-function websiteResponse(html, status=200, type="text/html; charset=utf-8") { return new Response(html, { status, headers: { "Content-Type": type, "Cache-Control": "public, max-age=120" } }); }
-
-async function websiteHome(request, env) {
-  const origin = await siteOrigin(request, env);
-  const name = await getSetting(env, "site_name") || "PDF ORBIT";
-  const desc = await getSetting(env, "site_description") || "Discover free PDFs, books, notes and study materials.";
-  const [products, categories] = await Promise.all([
-    sb(env, "products", { select: "product_id,title,description,cover_image,category_id,product_type", filter: [{ column: "status", operator: "eq", value: "active" }], order: "created_at.desc", limit: 30 }),
-    sb(env, "categories", { select: "id,name,slug,description", filter: [{ column: "status", operator: "eq", value: "active" }], order: "name.asc", limit: 30 })
-  ]);
-  const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
-  const cards = products.map(p => { const c = catMap[p.category_id]; const url = `${origin}/p/${slugify(c?.slug || "library")}/${slugify(p.title)}/${encodeURIComponent(p.product_id)}`; return `<article class="card">${p.cover_image ? `<img class="cover" src="${escapeHtml(p.cover_image)}" alt="${escapeHtml(p.title)} cover">` : ""}<span class="pill">${escapeHtml(p.product_type || "PDF")}</span><h2><a href="${escapeHtml(url)}">${escapeHtml(p.title)}</a></h2><p class="muted">${escapeHtml((p.description || "Download this PDF from PDF ORBIT.").substring(0, 150))}</p><a class="btn" href="${escapeHtml(url)}">View PDF</a></article>`; }).join("");
-  const cats = categories.map(c => `<a class="card" href="${origin}/category/${encodeURIComponent(c.slug)}"><span class="pill">CATEGORY</span><h2>${escapeHtml(c.name)}</h2><p class="muted">${escapeHtml(c.description || "Browse PDFs in this category.")}</p></a>`).join("");
-  return websiteResponse(pageShell(name, desc, origin, `<section class="hero"><h1>${escapeHtml(name)}</h1><p>${escapeHtml(desc)}</p><a class="btn" href="#latest">Browse latest PDFs</a></section><nav class="nav"><a href="${origin}/">Home</a><a href="#categories">Categories</a><a href="${origin}/sitemap.xml">Sitemap</a></nav><section id="categories"><h2>Explore Categories</h2><div class="grid">${cats || '<div class="empty">Categories coming soon.</div>'}</div></section><section id="latest"><h2>Latest PDFs</h2><div class="grid">${cards || '<div class="empty">New PDFs are coming soon.</div>'}</div></section><p class="footer">Free study resources and PDF downloads. Updated automatically from the library.</p>`));
-}
-
-async function websiteCategory(request, env, slug) {
-  const origin = await siteOrigin(request, env);
-  const cats = await sb(env, "categories", { select: "id,name,slug,description", filter: [{ column: "slug", operator: "eq", value: slug }, { column: "status", operator: "eq", value: "active" }], limit: 1 });
-  if (!cats.length) return websiteResponse(pageShell("Category not found", "This category does not exist.", `${origin}/category/${encodeURIComponent(slug)}`, `<div class="empty"><h1>Category not found</h1><a class="btn" href="${origin}/">Back home</a></div>`), 404);
-  const c = cats[0]; const products = await sb(env, "products", { select: "product_id,title,description,cover_image,product_type", filter: [{ column: "category_id", operator: "eq", value: c.id }, { column: "status", operator: "eq", value: "active" }], order: "created_at.desc", limit: 100 });
-  const cards = products.map(p => { const url = `${origin}/p/${slugify(c.slug)}/${slugify(p.title)}/${encodeURIComponent(p.product_id)}`; return `<article class="card"><span class="pill">${escapeHtml(p.product_type || "PDF")}</span><h2><a href="${url}">${escapeHtml(p.title)}</a></h2><p class="muted">${escapeHtml(p.description || "")}</p><a class="btn" href="${url}">View details</a></article>`; }).join("");
-  return websiteResponse(pageShell(`${c.name} PDFs`, c.description || `PDFs in ${c.name}`, `${origin}/category/${encodeURIComponent(c.slug)}`, `<nav class="nav"><a href="${origin}/">← Home</a></nav><section class="hero"><h1>${escapeHtml(c.name)}</h1><p>${escapeHtml(c.description || "Browse all PDFs in this category.")}</p></section><div class="grid">${cards || '<div class="empty">No PDFs in this category yet.</div>'}</div>`));
-}
-
-async function websiteProduct(request, env, route) {
-  const origin = await siteOrigin(request, env);
-  const id = route.split("/").pop();
-  const rows = await sb(env, "products", { select: "product_id,title,description,cover_image,category_id,product_type,file_name", filter: [{ column: "product_id", operator: "eq", value: id }, { column: "status", operator: "eq", value: "active" }], limit: 1 });
-  if (!rows.length) return websiteResponse(pageShell("PDF not found", "This PDF is unavailable.", `${origin}/p/${route}`, `<div class="empty"><h1>PDF not found</h1><a class="btn" href="${origin}/">Back home</a></div>`), 404);
-  const p = rows[0]; const cats = p.category_id ? await sb(env, "categories", { select: "name,slug", filter: [{ column: "id", operator: "eq", value: p.category_id }], limit: 1 }) : []; const c = cats[0]; const canonical = `${origin}/p/${slugify(c?.slug || "library")}/${slugify(p.title)}/${encodeURIComponent(p.product_id)}`; const cover = p.cover_image ? `<img class="cover" src="${escapeHtml(p.cover_image)}" alt="${escapeHtml(p.title)} cover">` : ""; const schema = { "@context": "https://schema.org", "@type": "Article", headline: p.title, description: p.description || "", url: canonical, image: p.cover_image || undefined };
-  return websiteResponse(pageShell(`${p.title} | PDF ORBIT`, p.description || `Download ${p.title} PDF`, canonical, `<nav class="nav"><a href="${origin}/">← Home</a>${c ? `<a href="${origin}/category/${encodeURIComponent(c.slug)}">${escapeHtml(c.name)}</a>` : ""}</nav><article class="card">${cover}<span class="pill">${escapeHtml(p.product_type || "PDF")}</span><h1>${escapeHtml(p.title)}</h1><p class="muted">${escapeHtml(p.description || "This PDF is available through the PDF ORBIT Telegram bot.")}</p><a class="btn" href="https://t.me/${escapeHtml((await getSetting(env, "telegram_username") || "pdforbit").replace(/^@/, ""))}">Get this PDF on Telegram</a></article><script type="application/ld+json">${JSON.stringify(schema)}</script>`));
-}
-
-async function websiteSitemap(request, env) { const origin = await siteOrigin(request, env); const [products, cats] = await Promise.all([sb(env, "products", { select: "product_id,title,category_id,updated_at", filter: [{ column: "status", operator: "eq", value: "active" }], limit: 5000 }), sb(env, "categories", { select: "id,slug", filter: [{ column: "status", operator: "eq", value: "active" }], limit: 500 })]); const map = Object.fromEntries(cats.map(c => [c.id, c.slug])); const urls = [`<url><loc>${origin}/</loc></url>`, ...cats.map(c => `<url><loc>${origin}/category/${encodeURIComponent(c.slug)}</loc></url>`), ...products.map(p => `<url><loc>${origin}/p/${slugify(map[p.category_id] || "library")}/${slugify(p.title)}/${encodeURIComponent(p.product_id)}</loc><lastmod>${new Date(p.updated_at || Date.now()).toISOString()}</lastmod></url>`)].join(""); return websiteResponse(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`, 200, "application/xml; charset=utf-8"); }
-async function websiteRobots(request, env) { const origin = await siteOrigin(request, env); return websiteResponse(`User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`, 200, "text/plain; charset=utf-8"); }
+async function siteOrigin(request,env){const configured=await getSetting(env,"website_url");if(configured&&/^https?:\/\//i.test(configured))return configured.replace(/\/$/,"");const host=request&&request.headers&&request.headers.get("host")||"pdforbits.blogspot.com";return "https://"+host;}
+function pageShell(title,description,canonical,body,extra){return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>"+escapeHtml(title)+"</title><meta name=\"description\" content=\""+escapeHtml(description)+"\"><link rel=\"canonical\" href=\""+escapeHtml(canonical)+"\"><meta property=\"og:title\" content=\""+escapeHtml(title)+"\"><meta property=\"og:description\" content=\""+escapeHtml(description)+"\">"+(extra||"")+"<style>body{margin:0;background:#f5f7fb;color:#172033;font-family:Inter,system-ui,sans-serif}.wrap{max-width:1120px;margin:auto;padding:24px 16px}.hero{background:linear-gradient(135deg,#101936,#3f5fe2);color:#fff;border-radius:24px;padding:38px 28px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:18px}.card{background:#fff;border:1px solid #e8ebf2;border-radius:18px;padding:20px;box-shadow:0 8px 28px #1720330d}.cover{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:14px}.pill{display:inline-block;background:#edf1ff;color:#314ccf;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800}.btn{display:inline-block;background:#3f5fe2;color:#fff;padding:12px 17px;border-radius:10px;font-weight:800;margin:8px 6px 0 0}.content{font-size:17px;line-height:1.8}.faq{border-top:1px solid #e7eaf1;padding:14px 0}.nav{display:flex;gap:15px;flex-wrap:wrap;margin:18px 0;color:#3f5fe2;font-weight:800}</style></head><body><main class=\"wrap\">"+body+"</main></body></html>";}
+function websiteResponse(body,status,type){return new Response(body,{status:status||200,headers:{"Content-Type":type||"text/html; charset=utf-8","Cache-Control":"public,max-age=120"}});}
+async function websiteHome(request,env){const origin=await siteOrigin(request,env);const name=await getSetting(env,"site_name")||"PDF ORBIT";const desc=await getSetting(env,"site_description")||"PDFs, notes, books, videos and study resources.";const ps=await sb(env,"products",{select:"product_id,title,description,cover_image,category_id,product_type,slug,media_type",filter:[{column:"status",operator:"eq",value:"active"}],order:"created_at.desc",limit:30});const cs=await sb(env,"categories",{select:"id,name,slug,description,image_url",filter:[{column:"status",operator:"eq",value:"active"}],order:"name.asc",limit:50});const cm=Object.fromEntries(cs.map(function(x){return[x.id,x];}));const cards=ps.map(function(p){const c=cm[p.category_id];const u=origin+"/p/"+slugify(c&&c.slug||"library")+"/"+slugify(p.slug||p.title)+"/"+encodeURIComponent(p.product_id);return "<article class=\"card\">"+(p.cover_image?"<img class=\"cover\" src=\""+escapeHtml(p.cover_image)+"\" alt=\""+escapeHtml(p.title)+" thumbnail\">":"")+"<span class=\"pill\">"+escapeHtml(p.media_type||p.product_type||"product")+"</span><h2><a href=\""+u+"\">"+escapeHtml(p.title)+"</a></h2><p>"+escapeHtml((p.description||"").slice(0,180))+"</p><a class=\"btn\" href=\""+u+"\">View</a></article>";}).join("");const cats=cs.map(function(x){return "<a class=\"card\" href=\""+origin+"/category/"+encodeURIComponent(x.slug)+"\"><h2>"+escapeHtml(x.name)+"</h2><p>"+escapeHtml(x.description||"")+"</p></a>";}).join("");return websiteResponse(pageShell(name,desc,origin,"<section class=\"hero\"><h1>"+escapeHtml(name)+"</h1><p>"+escapeHtml(desc)+"</p></section><nav class=\"nav\"><a href=\""+origin+"/\">Home</a><a href=\"#categories\">Categories</a><a href=\""+origin+"/sitemap.xml\">Sitemap</a></nav><section id=\"categories\"><h2>Categories</h2><div class=\"grid\">"+cats+"</div></section><h2>Latest Products</h2><div class=\"grid\">"+cards+"</div>"));}
+async function websiteCategory(request,env,slug){const origin=await siteOrigin(request,env);const cs=await sb(env,"categories",{select:"id,name,slug,description,seo_title,seo_description,noindex",filter:[{column:"slug",operator:"eq",value:slug},{column:"status",operator:"eq",value:"active"}],limit:1});if(!cs.length)return websiteResponse(pageShell("Category not found","",origin,"<div class=\"card\"><h1>Category not found</h1></div>"),404);const c=cs[0];const ps=await sb(env,"products",{select:"product_id,title,description,cover_image,product_type,media_type,slug",filter:[{column:"category_id",operator:"eq",value:c.id},{column:"status",operator:"eq",value:"active"}],order:"created_at.desc",limit:100});const cards=ps.map(function(p){const u=origin+"/p/"+slugify(c.slug)+"/"+slugify(p.slug||p.title)+"/"+encodeURIComponent(p.product_id);return "<article class=\"card\">"+(p.cover_image?"<img class=\"cover\" src=\""+escapeHtml(p.cover_image)+"\" alt=\""+escapeHtml(p.title)+"\">":"")+"<h2><a href=\""+u+"\">"+escapeHtml(p.title)+"</a></h2><p>"+escapeHtml(p.description||"")+"</p><a class=\"btn\" href=\""+u+"\">View</a></article>";}).join("");const noindex=c.noindex?"<meta name=\"robots\" content=\"noindex,follow\">":"";return websiteResponse(pageShell(c.seo_title||c.name,c.seo_description||c.description||"",origin+"/category/"+encodeURIComponent(c.slug),"<nav class=\"nav\"><a href=\""+origin+"/\">← Home</a></nav><section class=\"hero\"><h1>"+escapeHtml(c.name)+"</h1><p>"+escapeHtml(c.description||"")+"</p></section><div class=\"grid\">"+cards+"</div>",noindex));}
+async function websiteProduct(request,env,route){const origin=await siteOrigin(request,env);const id=route.split("/").pop();const rs=await sb(env,"products",{select:"id,product_id,title,description,cover_image,category_id,product_type,slug,seo_title,seo_description,content_html,faq_json,external_url,media_type,noindex,status",filter:[{column:"product_id",operator:"eq",value:id},{column:"status",operator:"eq",value:"active"}],limit:1});if(!rs.length)return websiteResponse(pageShell("Product not found","",origin,"<div class=\"card\"><h1>Product not found</h1></div>"),404);const p=rs[0];const cs=p.category_id?await sb(env,"categories",{select:"name,slug",filter:[{column:"id",operator:"eq",value:p.category_id}],limit:1}):[];const cat=cs[0];const url=origin+"/p/"+slugify(cat&&cat.slug||"library")+"/"+slugify(p.slug||p.title)+"/"+encodeURIComponent(p.product_id);const faq=Array.isArray(p.faq_json)?p.faq_json.map(function(x){return "<div class=\"faq\"><b>"+escapeHtml(x.q||x.question||"")+"</b><div>"+escapeHtml(x.a||x.answer||"")+"</div></div>";}).join(""):"";const noindex=p.noindex?"<meta name=\"robots\" content=\"noindex,follow\">":"";const bot=await getSetting(env,"telegram_username")||"PDForbitbot";const action=p.external_url?"<a class=\"btn\" href=\""+escapeHtml(p.external_url)+"\">🌐 Open Link</a>":"<a class=\"btn\" href=\"https://t.me/"+String(bot).replace(/^@/,"")+"?start="+encodeURIComponent(p.product_id)+"\">📥 Get on Telegram</a>";const schema=JSON.stringify({"@context":"https://schema.org","@type":"Product","name":p.title,"description":p.description||"","url":url,"image":p.cover_image||undefined});return websiteResponse(pageShell(p.seo_title||p.title,p.seo_description||p.description||"",url,"<nav class=\"nav\"><a href=\""+origin+"/\">← Home</a>"+(cat?"<a href=\""+origin+"/category/"+encodeURIComponent(cat.slug)+"\">"+escapeHtml(cat.name)+"</a>":"")+"</nav><article class=\"card\">"+(p.cover_image?"<img class=\"cover\" src=\""+escapeHtml(p.cover_image)+"\" alt=\""+escapeHtml(p.title)+"\">":"")+"<span class=\"pill\">"+escapeHtml(p.media_type||p.product_type||"product")+"</span><h1>"+escapeHtml(p.title)+"</h1><p>"+escapeHtml(p.description||"")+"</p><div class=\"content\">"+(p.content_html||"")+"</div>"+action+"<h2>FAQs</h2>"+(faq||"<p>No FAQs added.</p>")+"</article><script type=\"application/ld+json\">"+schema+"</script>",noindex));}
+async function websitePost(request,env,slug){const origin=await siteOrigin(request,env);const rs=await sb(env,"posts",{select:"post_id,title,slug,category_id,content_html,excerpt,thumbnail_url,faq_json,seo_title,seo_description,noindex,status",filter:[{column:"slug",operator:"eq",value:slug},{column:"status",operator:"eq",value:"active"}],limit:1});if(!rs.length)return websiteResponse(pageShell("Post not found","",origin,"<div class=\"card\"><h1>Post not found</h1></div>"),404);const p=rs[0];const url=origin+"/post/"+encodeURIComponent(p.slug);const faq=Array.isArray(p.faq_json)?p.faq_json.map(function(x){return "<div class=\"faq\"><b>"+escapeHtml(x.q||x.question||"")+"</b><div>"+escapeHtml(x.a||x.answer||"")+"</div></div>";}).join(""):"";const noindex=p.noindex?"<meta name=\"robots\" content=\"noindex,follow\">":"";const schema=JSON.stringify({"@context":"https://schema.org","@type":"Article","headline":p.title,"description":p.seo_description||p.excerpt||"","url":url});return websiteResponse(pageShell(p.seo_title||p.title,p.seo_description||p.excerpt||"",url,"<nav class=\"nav\"><a href=\""+origin+"/\">← Home</a></nav><article class=\"card\">"+(p.thumbnail_url?"<img class=\"cover\" src=\""+escapeHtml(p.thumbnail_url)+"\" alt=\""+escapeHtml(p.title)+"\">":"")+"<h1>"+escapeHtml(p.title)+"</h1><div class=\"content\">"+(p.content_html||"")+"</div><h2>FAQs</h2>"+(faq||"<p>No FAQs added.</p>")+"</article><script type=\"application/ld+json\">"+schema+"</script>",noindex));}
+async function websiteSitemap(request,env){const origin=await siteOrigin(request,env);const [ps,cs,posts]=await Promise.all([sb(env,"products",{select:"product_id,title,slug,category_id,updated_at,noindex",filter:[{column:"status",operator:"eq",value:"active"}],limit:5000}),sb(env,"categories",{select:"id,slug,noindex",filter:[{column:"status",operator:"eq",value:"active"}],limit:500}),sb(env,"posts",{select:"slug,updated_at,noindex",filter:[{column:"status",operator:"eq",value:"active"}],limit:5000})]);const cm=Object.fromEntries(cs.map(function(x){return[x.id,x.slug];}));const urls=["<url><loc>"+origin+"/</loc></url>"].concat(cs.filter(function(x){return !x.noindex;}).map(function(x){return "<url><loc>"+origin+"/category/"+encodeURIComponent(x.slug)+"</loc></url>";}),ps.filter(function(x){return !x.noindex;}).map(function(p){return "<url><loc>"+origin+"/p/"+slugify(cm[p.category_id]||"library")+"/"+slugify(p.slug||p.title)+"/"+encodeURIComponent(p.product_id)+"</loc></url>";}),posts.filter(function(x){return !x.noindex;}).map(function(p){return "<url><loc>"+origin+"/post/"+encodeURIComponent(p.slug)+"</loc></url>";})).join("");return websiteResponse("<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"+urls+"</urlset>",200,"application/xml; charset=utf-8");}
+async function websiteRobots(request,env){const origin=await siteOrigin(request,env);return websiteResponse("User-agent: *\nAllow: /\nSitemap: "+origin+"/sitemap.xml\n",200,"text/plain; charset=utf-8");}
