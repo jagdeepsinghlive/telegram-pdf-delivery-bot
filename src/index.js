@@ -1281,6 +1281,21 @@ async function checkReferralTask(chatId, task, env) {
 ========================================================= */
 
 async function deliverProduct(chatId, product, env) {
+  // Some older product records may have the file ID missing from the
+  // object passed into delivery. Re-fetch it directly from Supabase.
+  if (!product.telegram_file_id && product.product_id) {
+    const rows = await sb(env, "products", {
+      select: "telegram_file_id",
+      filter: [
+        { column: "product_id", operator: "eq", value: product.product_id },
+        { column: "status", operator: "eq", value: "active" }
+      ],
+      limit: 1
+    });
+
+    product.telegram_file_id = rows[0]?.telegram_file_id || null;
+  }
+
   if (!product.telegram_file_id) {
     await sendMessage(
       chatId,
