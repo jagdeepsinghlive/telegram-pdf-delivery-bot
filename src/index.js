@@ -1,9 +1,15 @@
 /**
+ * ============================================================
  * PDF ORBIT
- * Telegram Free PDF / Study Material Bot
+ * Telegram Free PDF / Notes / Study Material Bot
  * Cloudflare Worker + Supabase
  *
- * REQUIRED SECRETS:
+ * SINGLE FILE: index.js
+ *
+ * ALL PRODUCTS ARE FREE
+ *
+ * Required Cloudflare Secrets:
+ *
  * BOT_TOKEN
  * SUPABASE_URL
  * SUPABASE_KEY
@@ -12,10 +18,19 @@
  * CHANNEL_ID
  * CHANNEL_INVITE_URL
  *
- * ALL PRODUCTS ARE FREE.
+ * Optional:
+ * No payment gateway required.
+ * ============================================================
  */
 
-const TG = "https://api.telegram.org/bot";
+const TELEGRAM_API = "https://api.telegram.org/bot";
+
+const SESSION_MINUTES = 20;
+
+
+/* ============================================================
+   PRODUCT TYPES
+============================================================ */
 
 const PRODUCT_TYPES = [
   ["type:book", "📕 Book"],
@@ -26,70 +41,104 @@ const PRODUCT_TYPES = [
   ["type:other", "📦 Other"]
 ];
 
-const SESSION_MINUTES = 20;
 
-
-/* =========================================================
+/* ============================================================
    WORKER
-========================================================= */
+============================================================ */
 
 export default {
-  async fetch(request, env) {
-    try {
-      const url = new URL(request.url);
 
-      /* ---------------- HEALTH ---------------- */
+  async fetch(request, env) {
+
+    try {
+
+      const url =
+        new URL(request.url);
+
+
+      /* ======================================================
+         HEALTH
+      ====================================================== */
 
       if (
         request.method === "GET" &&
         url.pathname === "/"
       ) {
+
         return json({
+
           ok: true,
-          service: "PDF ORBIT Telegram Bot",
-          status: "running"
+
+          service:
+            "PDF ORBIT Telegram Bot",
+
+          status:
+            "running"
+
         });
       }
+
 
       if (
         request.method === "GET" &&
         url.pathname === "/health"
       ) {
+
         return json({
+
           ok: true,
-          status: "healthy",
-          time: new Date().toISOString()
+
+          status:
+            "healthy",
+
+          time:
+            new Date().toISOString()
+
         });
       }
 
-      /* ---------------- WEBSITE API ---------------- */
+
+      /* ======================================================
+         WEBSITE API
+      ====================================================== */
 
       if (
         request.method === "GET" &&
         url.pathname === "/api/products"
       ) {
-        return await apiProducts(env);
+
+        return await apiProducts(
+          env
+        );
       }
+
 
       if (
         request.method === "GET" &&
         url.pathname === "/api/search"
       ) {
+
         return await apiSearch(
           env,
           url.searchParams.get("q") || ""
         );
       }
 
+
       if (
         request.method === "GET" &&
-        url.pathname.startsWith("/api/product/")
+        url.pathname.startsWith(
+          "/api/product/"
+        )
       ) {
-        const productId = decodeURIComponent(
-          url.pathname.substring(
-            "/api/product/".length
-          )
-        );
+
+        const productId =
+          decodeURIComponent(
+            url.pathname.substring(
+              "/api/product/".length
+            )
+          );
+
 
         return await apiProduct(
           env,
@@ -97,45 +146,66 @@ export default {
         );
       }
 
+
       if (
         request.method === "GET" &&
         url.pathname === "/api/settings"
       ) {
-        return await apiSettings(env);
+
+        return await apiSettings(
+          env
+        );
       }
 
-      /* ---------------- TELEGRAM WEBHOOK ---------------- */
 
-      if (request.method === "POST") {
+      /* ======================================================
+         TELEGRAM WEBHOOK
+      ====================================================== */
 
-        if (env.WEBHOOK_SECRET) {
+      if (
+        request.method === "POST"
+      ) {
+
+        if (
+          env.WEBHOOK_SECRET
+        ) {
+
           const secret =
             request.headers.get(
               "X-Telegram-Bot-Api-Secret-Token"
             );
 
+
           if (
-            secret !== env.WEBHOOK_SECRET
+            secret !==
+            env.WEBHOOK_SECRET
           ) {
+
             return new Response(
               "Unauthorized",
-              { status: 401 }
+              {
+                status: 401
+              }
             );
           }
         }
 
+
         const update =
           await request.json();
+
 
         await handleUpdate(
           update,
           env
         );
 
+
         return json({
           ok: true
         });
       }
+
 
       return json(
         {
@@ -145,16 +215,21 @@ export default {
         404
       );
 
-    } catch (err) {
+    } catch (error) {
 
-      console.error(err);
+      console.error(
+        error
+      );
+
 
       return json(
         {
           ok: false,
+
           error:
             String(
-              err?.message || err
+              error?.message ||
+              error
             )
         },
         500
@@ -162,24 +237,40 @@ export default {
     }
   },
 
-  async scheduled(event, env, ctx) {
+
+  /* ========================================================
+     CRON CLEANUP
+  ======================================================== */
+
+  async scheduled(
+    event,
+    env,
+    ctx
+  ) {
+
     ctx.waitUntil(
-      cleanupExpired(env)
+      cleanupExpired(
+        env
+      )
     );
   }
+
 };
 
 
-/* =========================================================
+/* ============================================================
    UPDATE HANDLER
-========================================================= */
+============================================================ */
 
 async function handleUpdate(
   update,
   env
 ) {
 
-  if (update.callback_query) {
+  if (
+    update.callback_query
+  ) {
+
     await handleCallback(
       update.callback_query,
       env
@@ -188,26 +279,42 @@ async function handleUpdate(
     return;
   }
 
-  if (!update.message) {
+
+  if (
+    !update.message
+  ) {
+
     return;
   }
+
 
   const message =
     update.message;
 
+
   const user =
     message.from;
 
-  if (!user?.id) {
+
+  if (
+    !user ||
+    !user.id
+  ) {
+
     return;
   }
+
 
   await touchUser(
     user,
     env
   );
 
-  if (message.text) {
+
+  if (
+    message.text
+  ) {
+
     await handleText(
       message,
       env
@@ -216,7 +323,11 @@ async function handleUpdate(
     return;
   }
 
-  if (message.document) {
+
+  if (
+    message.document
+  ) {
+
     await handleDocument(
       message,
       env
@@ -225,7 +336,11 @@ async function handleUpdate(
     return;
   }
 
-  if (message.photo) {
+
+  if (
+    message.photo
+  ) {
+
     await handlePhoto(
       message,
       env
@@ -236,9 +351,9 @@ async function handleUpdate(
 }
 
 
-/* =========================================================
+/* ============================================================
    TEXT HANDLER
-========================================================= */
+============================================================ */
 
 async function handleText(
   message,
@@ -248,8 +363,10 @@ async function handleText(
   const chatId =
     message.chat.id;
 
+
   const user =
     message.from;
+
 
   const text =
     String(
@@ -257,11 +374,16 @@ async function handleText(
     ).trim();
 
 
-  /* START */
+  /* ========================================================
+     START
+  ======================================================== */
 
   if (
-    text.startsWith("/start")
+    text.startsWith(
+      "/start"
+    )
   ) {
+
     await handleStart(
       message,
       env
@@ -271,24 +393,35 @@ async function handleText(
   }
 
 
-  /* CANCEL */
+  /* ========================================================
+     CANCEL
+  ======================================================== */
 
-  if (text === "/cancel") {
+  if (
+    text === "/cancel"
+  ) {
 
     await clearSession(
       user.id,
       env
     );
 
+
     await sendMessage(
       env,
       chatId,
-      "❌ <b>Process cancelled.</b>\n\nYou are back to the main menu.",
+
+      "❌ <b>Process cancelled.</b>\n\n" +
+      "You are back to the main menu.",
+
       [
         [
           {
-            text: "🏠 Main Menu",
-            callback_data: "home"
+            text:
+              "🏠 Main Menu",
+
+            callback_data:
+              "home"
           }
         ]
       ]
@@ -298,9 +431,13 @@ async function handleText(
   }
 
 
-  /* ADMIN */
+  /* ========================================================
+     ADMIN
+  ======================================================== */
 
-  if (text === "/admin") {
+  if (
+    text === "/admin"
+  ) {
 
     if (
       !(await isAdmin(
@@ -308,6 +445,7 @@ async function handleText(
         env
       ))
     ) {
+
       await sendMessage(
         env,
         chatId,
@@ -316,6 +454,7 @@ async function handleText(
 
       return;
     }
+
 
     await adminPanel(
       chatId,
@@ -326,7 +465,9 @@ async function handleText(
   }
 
 
-  /* NEW PRODUCT */
+  /* ========================================================
+     NEW PRODUCT
+  ======================================================== */
 
   if (
     text === "/newproduct"
@@ -339,6 +480,7 @@ async function handleText(
         "product"
       ))
     ) {
+
       await sendMessage(
         env,
         chatId,
@@ -347,6 +489,7 @@ async function handleText(
 
       return;
     }
+
 
     await startProductCreation(
       user.id,
@@ -358,7 +501,9 @@ async function handleText(
   }
 
 
-  /* SEARCH */
+  /* ========================================================
+     SEARCH
+  ======================================================== */
 
   if (
     text === "/search"
@@ -367,7 +512,10 @@ async function handleText(
     await sendMessage(
       env,
       chatId,
-      "🔎 <b>Search Products</b>\n\nSend:\n<code>/search keyword</code>"
+
+      "🔎 <b>Search Products</b>\n\n" +
+      "Send:\n" +
+      "<code>/search keyword</code>"
     );
 
     return;
@@ -380,10 +528,14 @@ async function handleText(
     )
   ) {
 
-    const q =
-      text.substring(8).trim();
+    const query =
+      text
+        .substring(8)
+        .trim();
 
-    if (!q) {
+
+    if (!query) {
+
       await sendMessage(
         env,
         chatId,
@@ -393,9 +545,10 @@ async function handleText(
       return;
     }
 
+
     await telegramSearch(
       chatId,
-      q,
+      query,
       env
     );
 
@@ -403,7 +556,9 @@ async function handleText(
   }
 
 
-  /* SEARCH FALLBACK */
+  /* ========================================================
+     SEARCH WITHOUT SLASH
+  ======================================================== */
 
   if (
     text.startsWith(
@@ -411,13 +566,17 @@ async function handleText(
     )
   ) {
 
-    const q =
-      text.substring(7).trim();
+    const query =
+      text
+        .substring(7)
+        .trim();
 
-    if (q) {
+
+    if (query) {
+
       await telegramSearch(
         chatId,
-        q,
+        query,
         env
       );
     }
@@ -426,13 +585,16 @@ async function handleText(
   }
 
 
-  /* ADMIN SESSION */
+  /* ========================================================
+     ADMIN SESSION
+  ======================================================== */
 
   const session =
     await getSession(
       user.id,
       env
     );
+
 
   if (
     session &&
@@ -450,7 +612,9 @@ async function handleText(
   }
 
 
-  /* DEFAULT */
+  /* ========================================================
+     DEFAULT
+  ======================================================== */
 
   await sendMainMenu(
     chatId,
@@ -459,9 +623,9 @@ async function handleText(
 }
 
 
-/* =========================================================
-   START / DEEP LINKS
-========================================================= */
+/* ============================================================
+   START / DEEP LINK
+============================================================ */
 
 async function handleStart(
   message,
@@ -471,13 +635,16 @@ async function handleStart(
   const chatId =
     message.chat.id;
 
+
   const user =
     message.from;
+
 
   const parts =
     String(
       message.text || ""
     ).split(/\s+/);
+
 
   const payload =
     parts[1] || "";
@@ -489,7 +656,9 @@ async function handleStart(
   );
 
 
-  /* REFERRAL */
+  /* ========================================================
+     REFERRAL
+  ======================================================== */
 
   if (
     payload.startsWith(
@@ -500,21 +669,27 @@ async function handleStart(
     const value =
       payload.substring(4);
 
-    const sep =
+
+    const separator =
       value.indexOf("_");
 
-    if (sep > 0) {
+
+    if (
+      separator > 0
+    ) {
 
       const referrer =
         value.substring(
           0,
-          sep
+          separator
         );
+
 
       const productId =
         value.substring(
-          sep + 1
+          separator + 1
         );
+
 
       await processReferralStart(
         user.id,
@@ -523,6 +698,7 @@ async function handleStart(
         env
       );
     }
+
 
     await sendMainMenu(
       chatId,
@@ -533,9 +709,13 @@ async function handleStart(
   }
 
 
-  /* PRODUCT */
+  /* ========================================================
+     PRODUCT DEEP LINK
+  ======================================================== */
 
-  if (payload) {
+  if (
+    payload
+  ) {
 
     const product =
       await getProductByProductId(
@@ -543,7 +723,10 @@ async function handleStart(
         env
       );
 
-    if (product) {
+
+    if (
+      product
+    ) {
 
       await openProduct(
         user,
@@ -564,9 +747,9 @@ async function handleStart(
 }
 
 
-/* =========================================================
+/* ============================================================
    MAIN MENU
-========================================================= */
+============================================================ */
 
 async function sendMainMenu(
   chatId,
@@ -577,29 +760,45 @@ async function sendMainMenu(
 
     [
       {
-        text: "🔎 Search",
-        callback_data: "search"
+        text:
+          "🔎 Search",
+
+        callback_data:
+          "search"
       },
+
       {
-        text: "📚 Latest",
-        callback_data: "latest"
+        text:
+          "📚 Latest",
+
+        callback_data:
+          "latest"
       }
     ],
 
     [
       {
-        text: "📂 Categories",
-        callback_data: "categories"
+        text:
+          "📂 Categories",
+
+        callback_data:
+          "categories"
       },
+
       {
-        text: "⭐ Popular",
-        callback_data: "latest"
+        text:
+          "⭐ Popular",
+
+        callback_data:
+          "latest"
       }
     ],
 
     [
       {
-        text: "📢 Join Telegram",
+        text:
+          "📢 Join Telegram",
+
         url:
           env.CHANNEL_INVITE_URL ||
           "https://t.me/"
@@ -608,10 +807,14 @@ async function sendMainMenu(
 
     [
       {
-        text: "👤 Contact Admin",
-        callback_data: "contact"
+        text:
+          "👤 Contact Admin",
+
+        callback_data:
+          "contact"
       }
     ]
+
   ];
 
 
@@ -624,15 +827,20 @@ async function sendMainMenu(
 
     buttons.push([
       {
-        text: "👑 Admin Panel",
-        callback_data: "admin"
+        text:
+          "👑 Admin Panel",
+
+        callback_data:
+          "admin"
       }
     ]);
   }
 
 
   const text =
+
     "📚 <b>PDF ORBIT</b> 🚀\n" +
+
     "<i>Your Study Companion</i>\n\n" +
 
     "👋 <b>Welcome!</b>\n\n" +
@@ -640,10 +848,12 @@ async function sendMainMenu(
     "Get free study materials, notes, PYQs, books and PDFs — all in one place.\n\n" +
 
     "🆓 <b>100% FREE</b>\n" +
+
     "⚡ Instant Access\n" +
+
     "📖 Notes • 📝 Tests • 📕 Books\n\n" +
 
-    "━━━━━━━━━━━━━━━━━━\n" +
+    "━━━━━━━━━━━━━━━━━━\n\n" +
 
     "👇 <b>Choose an option below</b>";
 
@@ -657,9 +867,9 @@ async function sendMainMenu(
 }
 
 
-/* =========================================================
+/* ============================================================
    PRODUCT OPEN
-========================================================= */
+============================================================ */
 
 async function openProduct(
   user,
@@ -669,13 +879,15 @@ async function openProduct(
 ) {
 
   if (
-    product.status !== "active" ||
+    product.status !==
+      "active" ||
     product.deleted_at
   ) {
 
     await sendMessage(
       env,
       chatId,
+
       "❌ <b>This product is no longer available.</b>"
     );
 
@@ -690,12 +902,16 @@ async function openProduct(
   );
 
 
-  const websiteUrl =
+  const website =
     await productWebsiteUrl(
       product.product_id,
       env
     );
 
+
+  /* ========================================================
+     MAIN CHANNEL VERIFICATION
+  ======================================================== */
 
   const joined =
     await verifyRequiredChannel(
@@ -704,7 +920,9 @@ async function openProduct(
     );
 
 
-  if (!joined) {
+  if (
+    !joined
+  ) {
 
     const invite =
       env.CHANNEL_INVITE_URL ||
@@ -717,12 +935,17 @@ async function openProduct(
     const buttons = [];
 
 
-    if (invite) {
+    if (
+      invite
+    ) {
 
       buttons.push([
         {
-          text: "📢 Join Channel",
-          url: invite
+          text:
+            "📢 Join Channel",
+
+          url:
+            invite
         }
       ]);
     }
@@ -732,6 +955,7 @@ async function openProduct(
       {
         text:
           "✅ Verify Membership",
+
         callback_data:
           "verifyjoin:" +
           product.product_id
@@ -739,12 +963,17 @@ async function openProduct(
     ]);
 
 
-    if (websiteUrl) {
+    if (
+      website
+    ) {
 
       buttons.push([
         {
-          text: "🌐 Open Website",
-          url: websiteUrl
+          text:
+            "🌐 Open Website",
+
+          url:
+            website
         }
       ]);
     }
@@ -754,7 +983,10 @@ async function openProduct(
       env,
       chatId,
       product,
-      "🔐 <b>Channel Verification Required</b>\n\nJoin the required Telegram channel and then tap <b>Verify Membership</b>.",
+
+      "🔐 <b>Channel Verification Required</b>\n\n" +
+      "Join the required Telegram channel and then tap <b>Verify Membership</b>.",
+
       buttons
     );
 
@@ -771,9 +1003,9 @@ async function openProduct(
 }
 
 
-/* =========================================================
+/* ============================================================
    UNLOCK PRODUCT
-========================================================= */
+============================================================ */
 
 async function unlockProduct(
   telegramUserId,
@@ -791,8 +1023,8 @@ async function unlockProduct(
 
   const requiredTasks =
     tasks.filter(
-      t =>
-        t.required !== false
+      task =>
+        task.required !== false
     );
 
 
@@ -803,20 +1035,28 @@ async function unlockProduct(
     const task of requiredTasks
   ) {
 
-    const done =
+    const completed =
       await isTaskCompleted(
         telegramUserId,
         task.id,
         env
       );
 
-    if (!done) {
-      incomplete.push(task);
+
+    if (
+      !completed
+    ) {
+
+      incomplete.push(
+        task
+      );
     }
   }
 
 
-  /* TASKS */
+  /* ========================================================
+     REQUIRED TASKS
+  ======================================================== */
 
   if (
     incomplete.length
@@ -829,13 +1069,16 @@ async function unlockProduct(
       const task of incomplete
     ) {
 
-      if (task.task_url) {
+      if (
+        task.task_url
+      ) {
 
         buttons.push([
           {
             text:
               "🔗 " +
               task.title,
+
             url:
               task.task_url
           }
@@ -855,6 +1098,7 @@ async function unlockProduct(
             text:
               "✅ Verify " +
               task.title,
+
             callback_data:
               "taskverify:" +
               task.id
@@ -873,6 +1117,7 @@ async function unlockProduct(
             text:
               "✅ Complete: " +
               task.title,
+
             callback_data:
               "taskclick:" +
               task.id
@@ -886,6 +1131,7 @@ async function unlockProduct(
       {
         text:
           "🔄 Check Tasks",
+
         callback_data:
           "checktasks:" +
           product.product_id
@@ -897,8 +1143,10 @@ async function unlockProduct(
       env,
       chatId,
       product,
+
       "🔐 <b>Complete Required Tasks</b>\n\n" +
-        "Complete all required tasks to unlock this free PDF.",
+      "Complete all required tasks to unlock this free PDF.",
+
       buttons
     );
 
@@ -906,18 +1154,22 @@ async function unlockProduct(
   }
 
 
-  /* REFERRAL */
+  /* ========================================================
+     REFERRAL TASK
+  ======================================================== */
 
   const referralTask =
     tasks.find(
-      t =>
-        t.required !== false &&
-        t.task_type ===
+      task =>
+        task.required !== false &&
+        task.task_type ===
           "referral"
     );
 
 
-  if (referralTask) {
+  if (
+    referralTask
+  ) {
 
     const count =
       await countSuccessfulReferrals(
@@ -935,7 +1187,8 @@ async function unlockProduct(
 
 
     if (
-      count < required
+      count <
+      required
     ) {
 
       const bot =
@@ -959,6 +1212,7 @@ async function unlockProduct(
           {
             text:
               "📨 Invite Friends",
+
             url:
               "https://t.me/share/url?url=" +
               encodeURIComponent(
@@ -975,11 +1229,13 @@ async function unlockProduct(
           {
             text:
               "🔄 Check Referrals",
+
             callback_data:
               "checkref:" +
               product.product_id
           }
         ]
+
       ];
 
 
@@ -987,14 +1243,19 @@ async function unlockProduct(
         env,
         chatId,
         product,
+
         "🎁 <b>Referral Unlock</b>\n\n" +
-          "Invite friends to unlock this PDF.\n\n" +
-          "Required: <b>" +
-          required +
-          "</b>\n" +
-          "Completed: <b>" +
-          count +
-          "</b>",
+
+        "Invite friends to unlock this PDF.\n\n" +
+
+        "Required: <b>" +
+        required +
+        "</b>\n" +
+
+        "Completed: <b>" +
+        count +
+        "</b>",
+
         buttons
       );
 
@@ -1003,7 +1264,9 @@ async function unlockProduct(
   }
 
 
-  /* ALWAYS FREE */
+  /* ========================================================
+     PDF DELIVERY
+  ======================================================== */
 
   if (
     !product.telegram_file_id
@@ -1012,7 +1275,9 @@ async function unlockProduct(
     await sendMessage(
       env,
       chatId,
-      "❌ <b>PDF file is not available.</b>\n\nPlease contact admin."
+
+      "❌ <b>PDF file is not available.</b>\n\n" +
+      "Please contact admin."
     );
 
     return;
@@ -1022,14 +1287,18 @@ async function unlockProduct(
   await sendMessage(
     env,
     chatId,
+
     "🎉 <b>Unlocked Successfully!</b>\n\n" +
-      "📚 " +
-      escapeHtml(
-        product.title
-      ) +
-      "\n" +
-      "🆓 <b>FREE</b>\n\n" +
-      "📥 Sending your PDF..."
+
+    "📚 " +
+    escapeHtml(
+      product.title
+    ) +
+    "\n" +
+
+    "🆓 <b>FREE</b>\n\n" +
+
+    "📥 Sending your PDF..."
   );
 
 
@@ -1042,12 +1311,16 @@ async function unlockProduct(
     );
 
 
-  if (!result.ok) {
+  if (
+    !result.ok
+  ) {
 
     await sendMessage(
       env,
       chatId,
-      "❌ <b>PDF delivery failed.</b>\n\nPlease contact admin."
+
+      "❌ <b>PDF delivery failed.</b>\n\n" +
+      "Please contact admin."
     );
 
   } else {
@@ -1055,12 +1328,16 @@ async function unlockProduct(
     await sendMessage(
       env,
       chatId,
-      "✅ <b>PDF delivered successfully!</b>\n\nEnjoy your study material 📚",
+
+      "✅ <b>PDF delivered successfully!</b>\n\n" +
+      "Enjoy your study material 📚",
+
       [
         [
           {
             text:
               "🏠 Main Menu",
+
             callback_data:
               "home"
           }
@@ -1071,9 +1348,9 @@ async function unlockProduct(
 }
 
 
-/* =========================================================
+/* ============================================================
    PRODUCT CARD
-========================================================= */
+============================================================ */
 
 async function sendProductCard(
   env,
@@ -1083,24 +1360,27 @@ async function sendProductCard(
   buttons = []
 ) {
 
+  const description =
+    product.description
+      ? escapeHtml(
+          product.description
+        ).substring(
+          0,
+          500
+        ) +
+        "\n\n"
+      : "";
+
+
   const text =
+
     "📚 <b>" +
     escapeHtml(
       product.title
     ) +
     "</b>\n\n" +
 
-    (
-      product.description
-        ? escapeHtml(
-            product.description
-          ).substring(
-            0,
-            500
-          ) +
-          "\n\n"
-        : ""
-    ) +
+    description +
 
     "🏷️ Type: <b>" +
     escapeHtml(
@@ -1127,7 +1407,11 @@ async function sendProductCard(
         buttons
       );
 
-    if (result.ok) {
+
+    if (
+      result.ok
+    ) {
+
       return result;
     }
   }
@@ -1142,9 +1426,9 @@ async function sendProductCard(
 }
 
 
-/* =========================================================
+/* ============================================================
    CALLBACK HANDLER
-========================================================= */
+============================================================ */
 
 async function handleCallback(
   query,
@@ -1154,9 +1438,11 @@ async function handleCallback(
   const user =
     query.from;
 
+
   const chatId =
     query.message?.chat?.id ||
     user.id;
+
 
   const data =
     query.data || "";
@@ -1168,7 +1454,9 @@ async function handleCallback(
   );
 
 
-  /* HOME */
+  /* ========================================================
+     HOME
+  ======================================================== */
 
   if (
     data === "home"
@@ -1183,7 +1471,9 @@ async function handleCallback(
   }
 
 
-  /* SEARCH */
+  /* ========================================================
+     SEARCH
+  ======================================================== */
 
   if (
     data === "search"
@@ -1192,14 +1482,21 @@ async function handleCallback(
     await sendMessage(
       env,
       chatId,
-      "🔎 <b>Search Products</b>\n\nUse:\n<code>/search keyword</code>"
+
+      "🔎 <b>Search Products</b>\n\n" +
+
+      "Use:\n" +
+
+      "<code>/search keyword</code>"
     );
 
     return;
   }
 
 
-  /* LATEST */
+  /* ========================================================
+     LATEST
+  ======================================================== */
 
   if (
     data === "latest"
@@ -1214,7 +1511,9 @@ async function handleCallback(
   }
 
 
-  /* CATEGORIES */
+  /* ========================================================
+     CATEGORIES
+  ======================================================== */
 
   if (
     data === "categories"
@@ -1229,7 +1528,9 @@ async function handleCallback(
   }
 
 
-  /* CONTACT */
+  /* ========================================================
+     CONTACT
+  ======================================================== */
 
   if (
     data === "contact"
@@ -1245,17 +1546,22 @@ async function handleCallback(
     await sendMessage(
       env,
       chatId,
+
       contact
+
         ? "👤 <b>Contact Admin</b>\n\n" +
           escapeHtml(
             contact
           )
+
         : "❌ Admin contact is not configured.",
+
       [
         [
           {
             text:
               "🏠 Main Menu",
+
             callback_data:
               "home"
           }
@@ -1267,7 +1573,9 @@ async function handleCallback(
   }
 
 
-  /* CATEGORY PRODUCTS */
+  /* ========================================================
+     CATEGORY PRODUCTS
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -1280,6 +1588,7 @@ async function handleCallback(
         data.substring(8)
       );
 
+
     await categoryProducts(
       chatId,
       categoryId,
@@ -1290,7 +1599,56 @@ async function handleCallback(
   }
 
 
-  /* VERIFY MAIN CHANNEL */
+  /* ========================================================
+     OPEN PRODUCT
+  ======================================================== */
+
+  if (
+    data.startsWith(
+      "openproduct:"
+    )
+  ) {
+
+    const productId =
+      data.substring(
+        12
+      );
+
+
+    const product =
+      await getProductByProductId(
+        productId,
+        env
+      );
+
+
+    if (
+      product
+    ) {
+
+      await openProduct(
+        user,
+        chatId,
+        product,
+        env
+      );
+
+    } else {
+
+      await sendMessage(
+        env,
+        chatId,
+        "❌ Product not found."
+      );
+    }
+
+    return;
+  }
+
+
+  /* ========================================================
+     MAIN CHANNEL VERIFY
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -1311,7 +1669,9 @@ async function handleCallback(
       );
 
 
-    if (!product) {
+    if (
+      !product
+    ) {
 
       await sendMessage(
         env,
@@ -1330,17 +1690,23 @@ async function handleCallback(
       );
 
 
-    if (!joined) {
+    if (
+      !joined
+    ) {
 
       await sendMessage(
         env,
         chatId,
-        "❌ <b>Channel membership not detected.</b>\n\nPlease join the channel first and try again.",
+
+        "❌ <b>Channel membership not detected.</b>\n\n" +
+        "Please join the channel first and try again.",
+
         [
           [
             {
               text:
                 "🔄 Verify Again",
+
               callback_data:
                 "verifyjoin:" +
                 product.product_id
@@ -1356,6 +1722,7 @@ async function handleCallback(
     await sendMessage(
       env,
       chatId,
+
       "✅ <b>Channel verified!</b>"
     );
 
@@ -1371,7 +1738,9 @@ async function handleCallback(
   }
 
 
-  /* TASK VERIFY */
+  /* ========================================================
+     TASK VERIFY
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -1398,7 +1767,9 @@ async function handleCallback(
   }
 
 
-  /* TASK CLICK */
+  /* ========================================================
+     TASK CLICK
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -1424,12 +1795,16 @@ async function handleCallback(
     await sendMessage(
       env,
       chatId,
-      "✅ <b>Task marked complete.</b>\n\nClick <b>Check Tasks</b> to continue.",
+
+      "✅ <b>Task marked complete.</b>\n\n" +
+      "Click <b>Check Tasks</b> to continue.",
+
       [
         [
           {
             text:
               "🔄 Check Tasks",
+
             callback_data:
               "check_current_task"
           }
@@ -1441,7 +1816,9 @@ async function handleCallback(
   }
 
 
-  /* CHECK TASKS */
+  /* ========================================================
+     CHECK TASKS
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -1462,7 +1839,9 @@ async function handleCallback(
       );
 
 
-    if (product) {
+    if (
+      product
+    ) {
 
       await unlockProduct(
         user.id,
@@ -1476,7 +1855,9 @@ async function handleCallback(
   }
 
 
-  /* CHECK REFERRALS */
+  /* ========================================================
+     CHECK REFERRALS
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -1497,7 +1878,9 @@ async function handleCallback(
       );
 
 
-    if (product) {
+    if (
+      product
+    ) {
 
       await unlockProduct(
         user.id,
@@ -1511,7 +1894,9 @@ async function handleCallback(
   }
 
 
-  /* ADMIN ACCESS */
+  /* ========================================================
+     ADMIN
+  ======================================================== */
 
   if (
     data === "admin"
@@ -1540,11 +1925,14 @@ async function handleCallback(
       env
     ))
   ) {
+
     return;
   }
 
 
-  /* ADMIN PRODUCTS */
+  /* ========================================================
+     PRODUCT MANAGEMENT
+  ======================================================== */
 
   if (
     data ===
@@ -1589,7 +1977,9 @@ async function handleCallback(
   }
 
 
-  /* TASK ADMIN */
+  /* ========================================================
+     TASK MANAGEMENT
+  ======================================================== */
 
   if (
     data ===
@@ -1620,7 +2010,9 @@ async function handleCallback(
   }
 
 
-  /* USERS */
+  /* ========================================================
+     USERS
+  ======================================================== */
 
   if (
     data ===
@@ -1636,7 +2028,9 @@ async function handleCallback(
   }
 
 
-  /* ADMINS */
+  /* ========================================================
+     ADMINS
+  ======================================================== */
 
   if (
     data ===
@@ -1667,7 +2061,9 @@ async function handleCallback(
   }
 
 
-  /* WEBSITE */
+  /* ========================================================
+     WEBSITE
+  ======================================================== */
 
   if (
     data ===
@@ -1684,7 +2080,9 @@ async function handleCallback(
   }
 
 
-  /* CONTACT SETTING */
+  /* ========================================================
+     CONTACT SETTING
+  ======================================================== */
 
   if (
     data ===
@@ -1701,7 +2099,9 @@ async function handleCallback(
   }
 
 
-  /* CATEGORIES */
+  /* ========================================================
+     CATEGORIES
+  ======================================================== */
 
   if (
     data ===
@@ -1717,8 +2117,6 @@ async function handleCallback(
   }
 
 
-  /* NEW ADMIN CATEGORY */
-
   if (
     data ===
     "admin_category_new"
@@ -1726,10 +2124,12 @@ async function handleCallback(
 
     await createSession(
       user.id,
+
       {
         step:
           "category_admin_new"
       },
+
       env
     );
 
@@ -1737,14 +2137,20 @@ async function handleCallback(
     await sendMessage(
       env,
       chatId,
-      "📂 <b>Add New Category</b>\n\nEnter category name:\n\nExample:\n<code>SSC Exams</code>"
+
+      "📂 <b>Add New Category</b>\n\n" +
+      "Enter category name:\n\n" +
+      "Example:\n" +
+      "<code>SSC Exams</code>"
     );
 
     return;
   }
 
 
-  /* CLEANUP */
+  /* ========================================================
+     CLEANUP
+  ======================================================== */
 
   if (
     data ===
@@ -1759,6 +2165,7 @@ async function handleCallback(
     await sendMessage(
       env,
       chatId,
+
       "🧹 <b>Cleanup completed.</b>"
     );
 
@@ -1766,7 +2173,9 @@ async function handleCallback(
   }
 
 
-  /* DELETE PRODUCT */
+  /* ========================================================
+     DELETE PRODUCT
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -1792,7 +2201,9 @@ async function handleCallback(
   }
 
 
-  /* PRODUCT INFO */
+  /* ========================================================
+     PRODUCT INFO
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -1818,7 +2229,9 @@ async function handleCallback(
   }
 
 
-  /* TASK PRODUCT */
+  /* ========================================================
+     SELECT TASK PRODUCT
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -1841,16 +2254,21 @@ async function handleCallback(
       );
 
 
-    if (session) {
+    if (
+      session
+    ) {
 
       await updateSession(
         user.id,
+
         {
           product_id:
             String(id),
+
           step:
             "task_type"
         },
+
         env
       );
 
@@ -1858,40 +2276,51 @@ async function handleCallback(
       await sendMessage(
         env,
         chatId,
+
         "📋 <b>Choose Task Type</b>",
+
         [
           [
             {
               text:
                 "📢 Channel",
+
               callback_data:
                 "tasktype:channel"
             },
+
             {
               text:
                 "👥 Group",
+
               callback_data:
                 "tasktype:group"
             }
           ],
+
           [
             {
               text:
                 "🌐 Website",
+
               callback_data:
                 "tasktype:website"
             },
+
             {
               text:
                 "🔗 Custom Link",
+
               callback_data:
                 "tasktype:custom"
             }
           ],
+
           [
             {
               text:
                 "🎁 Referral",
+
               callback_data:
                 "tasktype:referral"
             }
@@ -1904,7 +2333,9 @@ async function handleCallback(
   }
 
 
-  /* TASK TYPE */
+  /* ========================================================
+     TASK TYPE
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -1925,19 +2356,24 @@ async function handleCallback(
       );
 
 
-    if (!session) {
+    if (
+      !session
+    ) {
       return;
     }
 
 
     await updateSession(
       user.id,
+
       {
         task_type:
           type,
+
         step:
           "task_title"
       },
+
       env
     );
 
@@ -1945,6 +2381,7 @@ async function handleCallback(
     await sendMessage(
       env,
       chatId,
+
       "✏️ <b>Enter task title:</b>"
     );
 
@@ -1952,7 +2389,9 @@ async function handleCallback(
   }
 
 
-  /* PRODUCT TYPE */
+  /* ========================================================
+     PRODUCT TYPE
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -1973,19 +2412,24 @@ async function handleCallback(
       );
 
 
-    if (!session) {
+    if (
+      !session
+    ) {
       return;
     }
 
 
     await updateSession(
       user.id,
+
       {
         product_type:
           type,
+
         step:
           "product_cover"
       },
+
       env
     );
 
@@ -1993,14 +2437,19 @@ async function handleCallback(
     await sendMessage(
       env,
       chatId,
-      "🖼️ <b>Product Cover</b>\n\nSend cover image/photo.\n\nOr type <code>skip</code>."
+
+      "🖼️ <b>Product Cover</b>\n\n" +
+      "Send cover image/photo.\n\n" +
+      "Or type <code>skip</code>."
     );
 
     return;
   }
 
 
-  /* PRODUCT CATEGORY */
+  /* ========================================================
+     PRODUCT CATEGORY
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -2008,7 +2457,7 @@ async function handleCallback(
     )
   ) {
 
-    const catId =
+    const categoryId =
       Number(
         data.substring(
           4
@@ -2023,19 +2472,24 @@ async function handleCallback(
       );
 
 
-    if (!session) {
+    if (
+      !session
+    ) {
       return;
     }
 
 
     await updateSession(
       user.id,
+
       {
         category_id:
-          catId,
+          categoryId,
+
         step:
           "product_type"
       },
+
       env
     );
 
@@ -2043,15 +2497,20 @@ async function handleCallback(
     await sendMessage(
       env,
       chatId,
+
       "📚 <b>Choose Product Type</b>",
+
       PRODUCT_TYPES.map(
-        x => [
+        item => [
+
           {
             text:
-              x[1],
+              item[1],
+
             callback_data:
-              x[0]
+              item[0]
           }
+
         ]
       )
     );
@@ -2060,18 +2519,23 @@ async function handleCallback(
   }
 
 
-  /* NEW CATEGORY DURING PRODUCT */
+  /* ========================================================
+     NEW CATEGORY
+  ======================================================== */
 
   if (
-    data === "cat:new"
+    data ===
+    "cat:new"
   ) {
 
     await updateSession(
       user.id,
+
       {
         step:
           "category_new"
       },
+
       env
     );
 
@@ -2079,6 +2543,7 @@ async function handleCallback(
     await sendMessage(
       env,
       chatId,
+
       "📂 <b>Enter new category name:</b>"
     );
 
@@ -2086,7 +2551,9 @@ async function handleCallback(
   }
 
 
-  /* PUBLISH */
+  /* ========================================================
+     PUBLISH PRODUCT
+  ======================================================== */
 
   if (
     data ===
@@ -2103,7 +2570,9 @@ async function handleCallback(
   }
 
 
-  /* CANCEL */
+  /* ========================================================
+     CANCEL SESSION
+  ======================================================== */
 
   if (
     data ===
@@ -2119,12 +2588,15 @@ async function handleCallback(
     await sendMessage(
       env,
       chatId,
+
       "❌ <b>Cancelled.</b>",
+
       [
         [
           {
             text:
               "🏠 Main Menu",
+
             callback_data:
               "home"
           }
@@ -2136,7 +2608,9 @@ async function handleCallback(
   }
 
 
-  /* REMOVE ADMIN */
+  /* ========================================================
+     REMOVE ADMIN
+  ======================================================== */
 
   if (
     data.startsWith(
@@ -2162,7 +2636,9 @@ async function handleCallback(
   }
 
 
-  /* CHECK CURRENT TASK */
+  /* ========================================================
+     CHECK CURRENT TASK
+  ======================================================== */
 
   if (
     data ===
@@ -2175,17 +2651,46 @@ async function handleCallback(
         env
       );
 
+
     if (
       session?.product_id
     ) {
 
-      const product =
+      let product =
         await getProductByProductId(
           session.product_id,
           env
         );
 
-      if (product) {
+
+      /* task session stores database id */
+      if (
+        !product &&
+        /^\d+$/.test(
+          session.product_id
+        )
+      ) {
+
+        const rows =
+          await sb(
+            env,
+            "/rest/v1/products" +
+              "?id=eq." +
+              session.product_id +
+              "&select=*"
+          );
+
+
+        product =
+          rows[0] ||
+          null;
+      }
+
+
+      if (
+        product
+      ) {
+
         await unlockProduct(
           user.id,
           chatId,
@@ -2200,9 +2705,9 @@ async function handleCallback(
 }
 
 
-/* =========================================================
+/* ============================================================
    ADMIN PANEL
-========================================================= */
+============================================================ */
 
 async function adminPanel(
   chatId,
@@ -2217,16 +2722,20 @@ async function adminPanel(
     "Manage products, tasks, categories and bot settings.",
 
     [
+
       [
         {
           text:
             "📦 Products",
+
           callback_data:
             "admin_products"
         },
+
         {
           text:
             "📋 Tasks",
+
           callback_data:
             "admin_tasks"
         }
@@ -2236,12 +2745,15 @@ async function adminPanel(
         {
           text:
             "👥 Users",
+
           callback_data:
             "admin_users"
         },
+
         {
           text:
             "👑 Admins",
+
           callback_data:
             "admin_admins"
         }
@@ -2251,6 +2763,7 @@ async function adminPanel(
         {
           text:
             "📂 Categories",
+
           callback_data:
             "admin_categories"
         }
@@ -2260,12 +2773,15 @@ async function adminPanel(
         {
           text:
             "🌐 Website",
+
           callback_data:
             "admin_website"
         },
+
         {
           text:
             "👤 Contact",
+
           callback_data:
             "admin_contact"
         }
@@ -2275,6 +2791,7 @@ async function adminPanel(
         {
           text:
             "🧹 Cleanup",
+
           callback_data:
             "admin_cleanup"
         }
@@ -2284,18 +2801,20 @@ async function adminPanel(
         {
           text:
             "🏠 Main Menu",
+
           callback_data:
             "home"
         }
       ]
+
     ]
   );
 }
 
 
-/* =========================================================
-   PRODUCT ADMIN
-========================================================= */
+/* ============================================================
+   PRODUCT ADMIN MENU
+============================================================ */
 
 async function productAdminMenu(
   chatId,
@@ -2307,13 +2826,16 @@ async function productAdminMenu(
     chatId,
 
     "📦 <b>PRODUCT MANAGEMENT</b>\n\n" +
+
     "All products are automatically FREE.",
 
     [
+
       [
         {
           text:
             "➕ Add Product",
+
           callback_data:
             "admin_add_product"
         }
@@ -2323,6 +2845,7 @@ async function productAdminMenu(
         {
           text:
             "📋 Product List",
+
           callback_data:
             "admin_product_list"
         }
@@ -2332,14 +2855,20 @@ async function productAdminMenu(
         {
           text:
             "🔙 Admin Panel",
+
           callback_data:
             "admin"
         }
       ]
+
     ]
   );
 }
 
+
+/* ============================================================
+   PRODUCT LIST
+============================================================ */
 
 async function adminProductList(
   chatId,
@@ -2349,25 +2878,31 @@ async function adminProductList(
   const products =
     await sb(
       env,
+
       "/rest/v1/products" +
-        "?select=id,product_id,title,price,status,product_type" +
-        "&deleted_at=is.null" +
-        "&order=id.desc" +
-        "&limit=50"
+      "?select=id,product_id,title,price,status,product_type" +
+      "&deleted_at=is.null" +
+      "&order=id.desc" +
+      "&limit=50"
     );
 
 
-  if (!products.length) {
+  if (
+    !products.length
+  ) {
 
     await sendMessage(
       env,
       chatId,
+
       "📦 <b>No products found.</b>",
+
       [
         [
           {
             text:
               "➕ Add Product",
+
             callback_data:
               "admin_add_product"
           }
@@ -2380,7 +2915,7 @@ async function adminProductList(
 
 
   for (
-    const p of products
+    const product of products
   ) {
 
     await sendMessage(
@@ -2389,19 +2924,19 @@ async function adminProductList(
 
       "📦 <b>" +
       escapeHtml(
-        p.title
+        product.title
       ) +
       "</b>\n\n" +
 
       "🆔 ID: <code>" +
       escapeHtml(
-        p.product_id
+        product.product_id
       ) +
       "</code>\n" +
 
       "📌 Type: " +
       escapeHtml(
-        p.product_type ||
+        product.product_type ||
         "pdf"
       ) +
       "\n" +
@@ -2409,27 +2944,36 @@ async function adminProductList(
       "💰 Price: <b>FREE</b>",
 
       [
+
         [
           {
             text:
               "ℹ️ Info",
+
             callback_data:
               "product_info:" +
-              p.id
+              product.id
           },
+
           {
             text:
               "🗑 Delete",
+
             callback_data:
               "delete_product:" +
-              p.id
+              product.id
           }
         ]
+
       ]
     );
   }
 }
 
+
+/* ============================================================
+   PRODUCT INFO
+============================================================ */
 
 async function adminProductInfo(
   id,
@@ -2440,19 +2984,23 @@ async function adminProductInfo(
   const rows =
     await sb(
       env,
-      "/rest/v1/products?id=eq." +
-        encodeURIComponent(
-          id
-        ) +
-        "&select=*"
+
+      "/rest/v1/products" +
+      "?id=eq." +
+      encodeURIComponent(
+        id
+      ) +
+      "&select=*"
     );
 
 
-  const p =
+  const product =
     rows[0];
 
 
-  if (!p) {
+  if (
+    !product
+  ) {
 
     await sendMessage(
       env,
@@ -2466,7 +3014,7 @@ async function adminProductInfo(
 
   const website =
     await productWebsiteUrl(
-      p.product_id,
+      product.product_id,
       env
     );
 
@@ -2479,19 +3027,19 @@ async function adminProductInfo(
 
     "🆔 ID: <code>" +
     escapeHtml(
-      p.product_id
+      product.product_id
     ) +
     "</code>\n" +
 
     "📚 Title: <b>" +
     escapeHtml(
-      p.title
+      product.title
     ) +
     "</b>\n" +
 
     "📌 Type: " +
     escapeHtml(
-      p.product_type ||
+      product.product_type ||
       "pdf"
     ) +
     "\n" +
@@ -2500,23 +3048,28 @@ async function adminProductInfo(
 
     "📊 Status: " +
     escapeHtml(
-      p.status ||
+      product.status ||
       ""
     ) +
 
-    "\n\n" +
-
     (
+
       website
-        ? "🌐 " +
+
+        ? "\n\n🌐 " +
           escapeHtml(
             website
           )
+
         : ""
     )
   );
 }
 
+
+/* ============================================================
+   DELETE PRODUCT
+============================================================ */
 
 async function deleteProduct(
   id,
@@ -2526,10 +3079,12 @@ async function deleteProduct(
 
   await sb(
     env,
+
     "/rest/v1/products?id=eq." +
-      encodeURIComponent(
-        id
-      ),
+    encodeURIComponent(
+      id
+    ),
+
     {
       method:
         "DELETE"
@@ -2542,13 +3097,15 @@ async function deleteProduct(
     chatId,
 
     "🗑 <b>Product removed.</b>\n\n" +
-    "Future Telegram delivery has been stopped.",
+
+    "Future delivery has been stopped.",
 
     [
       [
         {
           text:
             "📦 Product List",
+
           callback_data:
             "admin_product_list"
         }
@@ -2558,9 +3115,9 @@ async function deleteProduct(
 }
 
 
-/* =========================================================
-   PRODUCT CREATION
-========================================================= */
+/* ============================================================
+   START PRODUCT CREATION
+============================================================ */
 
 async function startProductCreation(
   userId,
@@ -2570,14 +3127,18 @@ async function startProductCreation(
 
   await createSession(
     userId,
+
     {
       step:
         "product_pdf",
+
       product_type:
         "pdf",
+
       price:
         0
     },
+
     env
   );
 
@@ -2587,11 +3148,17 @@ async function startProductCreation(
     chatId,
 
     "➕ <b>ADD FREE PRODUCT</b>\n\n" +
+
     "📄 Send the PDF document now.\n\n" +
+
     "💰 Price: <b>FREE</b>"
   );
 }
 
+
+/* ============================================================
+   DOCUMENT UPLOAD
+============================================================ */
 
 async function handleDocument(
   message,
@@ -2609,6 +3176,7 @@ async function handleDocument(
       "product"
     ))
   ) {
+
     return;
   }
 
@@ -2620,7 +3188,10 @@ async function handleDocument(
     );
 
 
-  if (!session) {
+  if (
+    !session
+  ) {
+
     return;
   }
 
@@ -2629,31 +3200,34 @@ async function handleDocument(
     session.step !==
     "product_pdf"
   ) {
+
     return;
   }
 
 
-  const doc =
+  const document =
     message.document;
 
 
   await updateSession(
     userId,
+
     {
+
       telegram_file_id:
-        doc.file_id,
+        document.file_id,
 
       file_name:
-        doc.file_name ||
+        document.file_name ||
         "",
 
       file_size:
-        doc.file_size ||
+        document.file_size ||
         null,
 
       mime_type:
-        doc.mime_type ||
-        "",
+        document.mime_type ||
+        "application/pdf",
 
       price:
         0,
@@ -2661,6 +3235,7 @@ async function handleDocument(
       step:
         "product_id"
     },
+
     env
   );
 
@@ -2670,15 +3245,19 @@ async function handleDocument(
     message.chat.id,
 
     "🆔 <b>Product ID</b>\n\n" +
+
     "Enter a unique ID.\n\n" +
-    "Example:\n<code>PHY001</code>"
+
+    "Example:\n" +
+
+    "<code>PHY001</code>"
   );
 }
 
 
-/* =========================================================
-   PHOTO
-========================================================= */
+/* ============================================================
+   PHOTO / COVER
+============================================================ */
 
 async function handlePhoto(
   message,
@@ -2696,52 +3275,62 @@ async function handlePhoto(
     );
 
 
-  if (!session) {
+  if (
+    !session
+  ) {
+
     return;
   }
 
 
   if (
-    session.step ===
+    session.step !==
     "product_cover"
   ) {
 
-    const photos =
-      message.photo ||
-      [];
-
-    const last =
-      photos[
-        photos.length - 1
-      ];
-
-
-    await updateSession(
-      userId,
-      {
-        cover_image_file_id:
-          last?.file_id ||
-          null,
-
-        step:
-          "product_preview"
-      },
-      env
-    );
-
-
-    await showProductPreview(
-      userId,
-      message.chat.id,
-      env
-    );
+    return;
   }
+
+
+  const photos =
+    message.photo ||
+    [];
+
+
+  const last =
+    photos[
+      photos.length - 1
+    ];
+
+
+  await updateSession(
+    userId,
+
+    {
+
+      cover_image_file_id:
+        last?.file_id ||
+        null,
+
+      step:
+        "product_preview"
+    },
+
+    env
+  );
+
+
+  await showProductPreview(
+    userId,
+    message.chat.id,
+    env
+  );
 }
 
 
-/* =========================================================
-   ADMIN SESSION
-========================================================= */
+/* ============================================================
+   ADMIN SESSION PROCESSOR
+============================================================ */
 
 async function processAdminSession(
   message,
@@ -2752,8 +3341,10 @@ async function processAdminSession(
   const userId =
     message.from.id;
 
+
   const chatId =
     message.chat.id;
+
 
   const text =
     String(
@@ -2761,7 +3352,9 @@ async function processAdminSession(
     ).trim();
 
 
-  /* PRODUCT ID */
+  /* ========================================================
+     PRODUCT ID
+  ======================================================== */
 
   if (
     session.step ===
@@ -2775,12 +3368,16 @@ async function processAdminSession(
       );
 
 
-    if (existing) {
+    if (
+      existing
+    ) {
 
       await sendMessage(
         env,
         chatId,
-        "❌ <b>This Product ID already exists.</b>\n\nEnter another ID."
+
+        "❌ <b>This Product ID already exists.</b>\n\n" +
+        "Enter another ID."
       );
 
       return;
@@ -2789,12 +3386,15 @@ async function processAdminSession(
 
     await updateSession(
       userId,
+
       {
         product_id:
           text,
+
         step:
           "product_title"
       },
+
       env
     );
 
@@ -2802,6 +3402,7 @@ async function processAdminSession(
     await sendMessage(
       env,
       chatId,
+
       "📚 <b>Enter product title:</b>"
     );
 
@@ -2809,7 +3410,9 @@ async function processAdminSession(
   }
 
 
-  /* PRODUCT TITLE */
+  /* ========================================================
+     TITLE
+  ======================================================== */
 
   if (
     session.step ===
@@ -2818,7 +3421,9 @@ async function processAdminSession(
 
     await updateSession(
       userId,
+
       {
+
         title:
           text,
 
@@ -2828,6 +3433,7 @@ async function processAdminSession(
         step:
           "product_description"
       },
+
       env
     );
 
@@ -2835,6 +3441,7 @@ async function processAdminSession(
     await sendMessage(
       env,
       chatId,
+
       "📝 <b>Enter product description:</b>"
     );
 
@@ -2842,7 +3449,9 @@ async function processAdminSession(
   }
 
 
-  /* DESCRIPTION */
+  /* ========================================================
+     DESCRIPTION
+  ======================================================== */
 
   if (
     session.step ===
@@ -2851,13 +3460,16 @@ async function processAdminSession(
 
     await updateSession(
       userId,
+
       {
+
         description:
           text,
 
         step:
           "product_category"
       },
+
       env
     );
 
@@ -2871,7 +3483,9 @@ async function processAdminSession(
   }
 
 
-  /* NEW CATEGORY DURING PRODUCT */
+  /* ========================================================
+     NEW CATEGORY WHILE ADDING PRODUCT
+  ======================================================== */
 
   if (
     session.step ===
@@ -2882,11 +3496,14 @@ async function processAdminSession(
       text.trim();
 
 
-    if (!name) {
+    if (
+      !name
+    ) {
 
       await sendMessage(
         env,
         chatId,
+
         "❌ Category name cannot be empty."
       );
 
@@ -2901,11 +3518,14 @@ async function processAdminSession(
       );
 
 
-    if (!category) {
+    if (
+      !category
+    ) {
 
       await sendMessage(
         env,
         chatId,
+
         "❌ Category could not be created."
       );
 
@@ -2915,13 +3535,16 @@ async function processAdminSession(
 
     await updateSession(
       userId,
+
       {
+
         category_id:
           category.id,
 
         step:
           "product_type"
       },
+
       env
     );
 
@@ -2929,14 +3552,19 @@ async function processAdminSession(
     await sendMessage(
       env,
       chatId,
-      "✅ <b>Category created.</b>\n\n📚 Choose product type:",
+
+      "✅ <b>Category created.</b>\n\n" +
+
+      "📚 Choose product type:",
+
       PRODUCT_TYPES.map(
-        x => [
+        item => [
           {
             text:
-              x[1],
+              item[1],
+
             callback_data:
-              x[0]
+              item[0]
           }
         ]
       )
@@ -2946,7 +3574,9 @@ async function processAdminSession(
   }
 
 
-  /* ADMIN CATEGORY */
+  /* ========================================================
+     ADMIN NEW CATEGORY
+  ======================================================== */
 
   if (
     session.step ===
@@ -2957,11 +3587,14 @@ async function processAdminSession(
       text.trim();
 
 
-    if (!name) {
+    if (
+      !name
+    ) {
 
       await sendMessage(
         env,
         chatId,
+
         "❌ Category name cannot be empty."
       );
 
@@ -2976,12 +3609,16 @@ async function processAdminSession(
       );
 
 
-    if (!category) {
+    if (
+      !category
+    ) {
 
       await sendMessage(
         env,
         chatId,
-        "❌ Category could not be created.\n\nCheck Supabase categories table."
+
+        "❌ Category could not be created.\n\n" +
+        "Check Supabase categories table."
       );
 
       return;
@@ -3017,14 +3654,17 @@ async function processAdminSession(
           {
             text:
               "📂 Categories",
+
             callback_data:
               "admin_categories"
           }
         ],
+
         [
           {
             text:
               "👑 Admin Panel",
+
             callback_data:
               "admin"
           }
@@ -3036,7 +3676,9 @@ async function processAdminSession(
   }
 
 
-  /* COVER SKIP */
+  /* ========================================================
+     COVER SKIP
+  ======================================================== */
 
   if (
     session.step ===
@@ -3050,13 +3692,16 @@ async function processAdminSession(
 
       await updateSession(
         userId,
+
         {
+
           cover_image_file_id:
             null,
 
           step:
             "product_preview"
         },
+
         env
       );
 
@@ -3072,17 +3717,9 @@ async function processAdminSession(
   }
 
 
-  /* PREVIEW */
-
-  if (
-    session.step ===
-    "product_preview"
-  ) {
-    return;
-  }
-
-
-  /* TASK TITLE */
+  /* ========================================================
+     TASK TITLE
+  ======================================================== */
 
   if (
     session.step ===
@@ -3091,13 +3728,16 @@ async function processAdminSession(
 
     await updateSession(
       userId,
+
       {
+
         title:
           text,
 
         step:
           "task_url"
       },
+
       env
     );
 
@@ -3114,7 +3754,10 @@ async function processAdminSession(
         chatId,
 
         "📢 <b>Enter Telegram Channel/Group ID</b>\n\n" +
-        "Example:\n<code>-1001234567890</code>"
+
+        "Example:\n" +
+
+        "<code>-1001234567890</code>"
       );
 
     } else if (
@@ -3125,7 +3768,12 @@ async function processAdminSession(
       await sendMessage(
         env,
         chatId,
-        "🎁 <b>Enter required referral count</b>\n\nExample: <code>2</code>"
+
+        "🎁 <b>Enter required referral count</b>\n\n" +
+
+        "Example:\n" +
+
+        "<code>2</code>"
       );
 
     } else {
@@ -3133,6 +3781,7 @@ async function processAdminSession(
       await sendMessage(
         env,
         chatId,
+
         "🔗 <b>Enter task URL:</b>"
       );
     }
@@ -3141,7 +3790,9 @@ async function processAdminSession(
   }
 
 
-  /* TASK URL */
+  /* ========================================================
+     TASK URL
+  ======================================================== */
 
   if (
     session.step ===
@@ -3150,27 +3801,39 @@ async function processAdminSession(
 
     await updateSession(
       userId,
+
       {
+
         task_url:
           session.task_type ===
             "referral"
+
             ? null
+
             : text,
 
         channel_id:
-          session.task_type ===
+          (
+            session.task_type ===
               "channel" ||
-          session.task_type ===
+
+            session.task_type ===
               "group"
+          )
+
             ? text
+
             : null,
 
         step:
           session.task_type ===
             "referral"
+
             ? "task_count"
+
             : "task_required"
       },
+
       env
     );
 
@@ -3183,7 +3846,10 @@ async function processAdminSession(
       await sendMessage(
         env,
         chatId,
-        "🔐 <b>Required task?</b>\n\nSend <code>yes</code> or <code>no</code>."
+
+        "🔐 <b>Required task?</b>\n\n" +
+
+        "Send <code>yes</code> or <code>no</code>."
       );
 
     } else {
@@ -3191,6 +3857,7 @@ async function processAdminSession(
       await sendMessage(
         env,
         chatId,
+
         "🎁 <b>Enter required referral count:</b>"
       );
     }
@@ -3199,7 +3866,9 @@ async function processAdminSession(
   }
 
 
-  /* TASK COUNT */
+  /* ========================================================
+     TASK COUNT
+  ======================================================== */
 
   if (
     session.step ===
@@ -3207,7 +3876,9 @@ async function processAdminSession(
   ) {
 
     const count =
-      Number(text);
+      Number(
+        text
+      );
 
 
     if (
@@ -3220,6 +3891,7 @@ async function processAdminSession(
       await sendMessage(
         env,
         chatId,
+
         "❌ Enter a valid number."
       );
 
@@ -3229,13 +3901,16 @@ async function processAdminSession(
 
     await updateSession(
       userId,
+
       {
+
         required_count:
           count,
 
         step:
           "task_required"
       },
+
       env
     );
 
@@ -3243,14 +3918,19 @@ async function processAdminSession(
     await sendMessage(
       env,
       chatId,
-      "🔐 <b>Required task?</b>\n\nSend <code>yes</code> or <code>no</code>."
+
+      "🔐 <b>Required task?</b>\n\n" +
+
+      "Send <code>yes</code> or <code>no</code>."
     );
 
     return;
   }
 
 
-  /* TASK REQUIRED */
+  /* ========================================================
+     TASK REQUIRED
+  ======================================================== */
 
   if (
     session.step ===
@@ -3274,7 +3954,9 @@ async function processAdminSession(
   }
 
 
-  /* WEBSITE */
+  /* ========================================================
+     WEBSITE URL
+  ======================================================== */
 
   if (
     session.step ===
@@ -3293,6 +3975,7 @@ async function processAdminSession(
         "https://"
       )
     ) {
+
       website =
         "https://" +
         website;
@@ -3315,15 +3998,20 @@ async function processAdminSession(
     await sendMessage(
       env,
       chatId,
-      "✅ <b>Website URL saved.</b>\n\n🌐 " +
+
+      "✅ <b>Website URL saved.</b>\n\n" +
+
+      "🌐 " +
       escapeHtml(
         website
       ),
+
       [
         [
           {
             text:
               "👑 Admin Panel",
+
             callback_data:
               "admin"
           }
@@ -3335,7 +4023,9 @@ async function processAdminSession(
   }
 
 
-  /* CONTACT */
+  /* ========================================================
+     CONTACT ADMIN
+  ======================================================== */
 
   if (
     session.step ===
@@ -3358,6 +4048,7 @@ async function processAdminSession(
     await sendMessage(
       env,
       chatId,
+
       "✅ <b>Contact Admin updated.</b>"
     );
 
@@ -3365,7 +4056,9 @@ async function processAdminSession(
   }
 
 
-  /* ADD ADMIN */
+  /* ========================================================
+     ADD ADMIN
+  ======================================================== */
 
   if (
     session.step ===
@@ -3373,7 +4066,9 @@ async function processAdminSession(
   ) {
 
     const telegramId =
-      Number(text);
+      Number(
+        text
+      );
 
 
     if (
@@ -3385,6 +4080,7 @@ async function processAdminSession(
       await sendMessage(
         env,
         chatId,
+
         "❌ Invalid Telegram User ID."
       );
 
@@ -3394,12 +4090,16 @@ async function processAdminSession(
 
     await sb(
       env,
+
       "/rest/v1/admins",
+
       {
+
         method:
           "POST",
 
         body: {
+
           telegram_user_id:
             telegramId,
 
@@ -3428,6 +4128,7 @@ async function processAdminSession(
     await sendMessage(
       env,
       chatId,
+
       "✅ <b>Admin added successfully.</b>"
     );
 
@@ -3436,9 +4137,9 @@ async function processAdminSession(
 }
 
 
-/* =========================================================
+/* ============================================================
    PRODUCT PREVIEW
-========================================================= */
+============================================================ */
 
 async function showProductPreview(
   userId,
@@ -3446,14 +4147,16 @@ async function showProductPreview(
   env
 ) {
 
-  const s =
+  const session =
     await getSession(
       userId,
       env
     );
 
 
-  if (!s) {
+  if (
+    !session
+  ) {
     return;
   }
 
@@ -3466,19 +4169,19 @@ async function showProductPreview(
 
     "🆔 ID: <code>" +
     escapeHtml(
-      s.product_id
+      session.product_id
     ) +
     "</code>\n" +
 
     "📚 Title: <b>" +
     escapeHtml(
-      s.title
+      session.title
     ) +
     "</b>\n" +
 
     "📌 Type: " +
     escapeHtml(
-      s.product_type ||
+      session.product_type ||
       "pdf"
     ) +
     "\n" +
@@ -3486,7 +4189,7 @@ async function showProductPreview(
     "💰 Price: <b>FREE</b>\n\n" +
 
     escapeHtml(
-      s.description ||
+      session.description ||
       ""
     ),
 
@@ -3495,14 +4198,17 @@ async function showProductPreview(
         {
           text:
             "✅ Publish FREE PDF",
+
           callback_data:
             "publish_product"
         }
       ],
+
       [
         {
           text:
             "❌ Cancel",
+
           callback_data:
             "cancel_session"
         }
@@ -3512,9 +4218,9 @@ async function showProductPreview(
 }
 
 
-/* =========================================================
+/* ============================================================
    PUBLISH PRODUCT
-========================================================= */
+============================================================ */
 
 async function publishProductFromSession(
   userId,
@@ -3522,18 +4228,21 @@ async function publishProductFromSession(
   env
 ) {
 
-  const s =
+  const session =
     await getSession(
       userId,
       env
     );
 
 
-  if (!s) {
+  if (
+    !session
+  ) {
 
     await sendMessage(
       env,
       chatId,
+
       "❌ <b>Session expired.</b>"
     );
 
@@ -3541,11 +4250,14 @@ async function publishProductFromSession(
   }
 
 
-  if (!s.telegram_file_id) {
+  if (
+    !session.telegram_file_id
+  ) {
 
     await sendMessage(
       env,
       chatId,
+
       "❌ PDF missing."
     );
 
@@ -3555,16 +4267,19 @@ async function publishProductFromSession(
 
   const existing =
     await getProductByProductId(
-      s.product_id,
+      session.product_id,
       env
     );
 
 
-  if (existing) {
+  if (
+    existing
+  ) {
 
     await sendMessage(
       env,
       chatId,
+
       "❌ Product ID already exists."
     );
 
@@ -3574,51 +4289,54 @@ async function publishProductFromSession(
 
   await sb(
     env,
+
     "/rest/v1/products",
+
     {
+
       method:
         "POST",
 
       body: {
 
         product_id:
-          s.product_id,
+          session.product_id,
 
         title:
-          s.title,
+          session.title,
 
         description:
-          s.description ||
+          session.description ||
           "",
 
         product_type:
-          s.product_type ||
+          session.product_type ||
           "pdf",
 
         price:
           0,
 
         telegram_file_id:
-          s.telegram_file_id,
+          session.telegram_file_id,
 
         file_name:
-          s.file_name ||
+          session.file_name ||
           "",
 
         file_size:
-          s.file_size ||
+          session.file_size ||
           null,
 
         mime_type:
-          s.mime_type ||
+          session.mime_type ||
           "application/pdf",
 
         cover_image:
-          s.cover_image_file_id ||
+          session.cover_image_file_id ||
           null,
 
         category_id:
-          s.category_id ||
+          session.category_id ||
           null,
 
         status:
@@ -3639,7 +4357,7 @@ async function publishProductFromSession(
 
   const website =
     await productWebsiteUrl(
-      s.product_id,
+      session.product_id,
       env
     );
 
@@ -3650,12 +4368,12 @@ async function publishProductFromSession(
     );
 
 
-  const telegram =
+  const telegramUrl =
     "https://t.me/" +
     bot +
     "?start=" +
     encodeURIComponent(
-      s.product_id
+      session.product_id
     );
 
 
@@ -3667,7 +4385,7 @@ async function publishProductFromSession(
 
     "📚 " +
     escapeHtml(
-      s.title
+      session.title
     ) +
     "\n\n" +
 
@@ -3675,7 +4393,7 @@ async function publishProductFromSession(
 
     "🆔 ID: <code>" +
     escapeHtml(
-      s.product_id
+      session.product_id
     ) +
     "</code>\n\n" +
 
@@ -3684,11 +4402,12 @@ async function publishProductFromSession(
       website ||
       "Not configured"
     ) +
+
     "\n\n" +
 
     "🤖 Telegram:\n" +
     escapeHtml(
-      telegram
+      telegramUrl
     ),
 
     [
@@ -3696,14 +4415,17 @@ async function publishProductFromSession(
         {
           text:
             "📦 Product List",
+
           callback_data:
             "admin_product_list"
         }
       ],
+
       [
         {
           text:
             "👑 Admin Panel",
+
           callback_data:
             "admin"
         }
@@ -3713,9 +4435,9 @@ async function publishProductFromSession(
 }
 
 
-/* =========================================================
+/* ============================================================
    CATEGORY SYSTEM
-========================================================= */
+============================================================ */
 
 async function createCategory(
   name,
@@ -3728,7 +4450,10 @@ async function createCategory(
     ).trim();
 
 
-  if (!cleanName) {
+  if (
+    !cleanName
+  ) {
+
     return null;
   }
 
@@ -3739,7 +4464,10 @@ async function createCategory(
     );
 
 
-  if (!slug) {
+  if (
+    !slug
+  ) {
+
     return null;
   }
 
@@ -3747,24 +4475,31 @@ async function createCategory(
   const existing =
     await sb(
       env,
+
       "/rest/v1/categories" +
-        "?or=(" +
-        "name.ilike." +
-        encodeURIComponent(
-          cleanName
-        ) +
-        ",slug.eq." +
-        encodeURIComponent(
-          slug
-        ) +
-        ")" +
-        "&select=id,name,slug"
+
+      "?or=(" +
+
+      "name.ilike." +
+      encodeURIComponent(
+        cleanName
+      ) +
+
+      ",slug.eq." +
+      encodeURIComponent(
+        slug
+      ) +
+
+      ")" +
+
+      "&select=id,name,slug"
     );
 
 
   if (
     existing.length
   ) {
+
     return existing[0];
   }
 
@@ -3772,12 +4507,16 @@ async function createCategory(
   const rows =
     await sb(
       env,
+
       "/rest/v1/categories",
+
       {
+
         method:
           "POST",
 
         body: {
+
           category_id:
             "CAT-" +
             Date.now(),
@@ -3812,6 +4551,10 @@ async function createCategory(
 }
 
 
+/* ============================================================
+   PRODUCT CATEGORY SELECT
+============================================================ */
+
 async function showCategoriesForProduct(
   chatId,
   env
@@ -3820,24 +4563,31 @@ async function showCategoriesForProduct(
   const categories =
     await sb(
       env,
+
       "/rest/v1/categories" +
-        "?select=id,name" +
-        "&status=eq.active" +
-        "&order=name.asc"
+
+      "?select=id,name" +
+
+      "&status=eq.active" +
+
+      "&order=name.asc"
     );
 
 
   const buttons =
     categories.map(
-      c => [
+      category => [
+
         {
           text:
             "📂 " +
-            c.name,
+            category.name,
+
           callback_data:
             "cat:" +
-            c.id
+            category.id
         }
+
       ]
     );
 
@@ -3846,6 +4596,7 @@ async function showCategoriesForProduct(
     {
       text:
         "➕ New Category",
+
       callback_data:
         "cat:new"
     }
@@ -3856,6 +4607,7 @@ async function showCategoriesForProduct(
     {
       text:
         "❌ Cancel",
+
       callback_data:
         "cancel_session"
     }
@@ -3867,12 +4619,17 @@ async function showCategoriesForProduct(
     chatId,
 
     "📂 <b>Choose Category</b>\n\n" +
+
     "Select an existing category or create a new one.",
 
     buttons
   );
 }
 
+
+/* ============================================================
+   ADMIN CATEGORY MENU
+============================================================ */
 
 async function categoryAdminMenu(
   chatId,
@@ -3882,9 +4639,12 @@ async function categoryAdminMenu(
   const categories =
     await sb(
       env,
+
       "/rest/v1/categories" +
-        "?select=id,category_id,name,slug,status" +
-        "&order=name.asc"
+
+      "?select=id,category_id,name,slug,status" +
+
+      "&order=name.asc"
     );
 
 
@@ -3906,19 +4666,20 @@ async function categoryAdminMenu(
 
 
     for (
-      const c of categories
+      const category of categories
     ) {
 
       text +=
+
         "📁 <b>" +
         escapeHtml(
-          c.name
+          category.name
         ) +
         "</b>\n" +
 
         "🆔 <code>" +
         escapeHtml(
-          c.category_id
+          category.category_id
         ) +
         "</code>\n\n";
     }
@@ -3935,6 +4696,7 @@ async function categoryAdminMenu(
         {
           text:
             "➕ Add Category",
+
           callback_data:
             "admin_category_new"
         }
@@ -3944,6 +4706,7 @@ async function categoryAdminMenu(
         {
           text:
             "🔄 Refresh",
+
           callback_data:
             "admin_categories"
         }
@@ -3953,6 +4716,7 @@ async function categoryAdminMenu(
         {
           text:
             "🔙 Admin Panel",
+
           callback_data:
             "admin"
         }
@@ -3962,6 +4726,10 @@ async function categoryAdminMenu(
 }
 
 
+/* ============================================================
+   USER CATEGORIES
+============================================================ */
+
 async function userCategories(
   chatId,
   env
@@ -3970,10 +4738,14 @@ async function userCategories(
   const categories =
     await sb(
       env,
+
       "/rest/v1/categories" +
-        "?select=id,name,description" +
-        "&status=eq.active" +
-        "&order=name.asc"
+
+      "?select=id,name,description" +
+
+      "&status=eq.active" +
+
+      "&order=name.asc"
     );
 
 
@@ -3984,12 +4756,15 @@ async function userCategories(
     await sendMessage(
       env,
       chatId,
+
       "📂 <b>No categories available yet.</b>",
+
       [
         [
           {
             text:
               "🏠 Main Menu",
+
             callback_data:
               "home"
           }
@@ -4003,15 +4778,18 @@ async function userCategories(
 
   const buttons =
     categories.map(
-      c => [
+      category => [
+
         {
           text:
             "📂 " +
-            c.name,
+            category.name,
+
           callback_data:
             "usercat:" +
-            c.id
+            category.id
         }
+
       ]
     );
 
@@ -4020,6 +4798,7 @@ async function userCategories(
     {
       text:
         "🏠 Main Menu",
+
       callback_data:
         "home"
     }
@@ -4038,6 +4817,10 @@ async function userCategories(
 }
 
 
+/* ============================================================
+   CATEGORY PRODUCTS
+============================================================ */
+
 async function categoryProducts(
   chatId,
   categoryId,
@@ -4047,16 +4830,23 @@ async function categoryProducts(
   const products =
     await sb(
       env,
+
       "/rest/v1/products" +
-        "?select=id,product_id,title,description,price,product_type,cover_image" +
-        "&category_id=eq." +
-        encodeURIComponent(
-          categoryId
-        ) +
-        "&status=eq.active" +
-        "&deleted_at=is.null" +
-        "&order=created_at.desc" +
-        "&limit=20"
+
+      "?select=id,product_id,title,description,price,product_type,cover_image" +
+
+      "&category_id=eq." +
+      encodeURIComponent(
+        categoryId
+      ) +
+
+      "&status=eq.active" +
+
+      "&deleted_at=is.null" +
+
+      "&order=created_at.desc" +
+
+      "&limit=20"
     );
 
 
@@ -4067,12 +4857,15 @@ async function categoryProducts(
     await sendMessage(
       env,
       chatId,
+
       "📂 <b>No products found in this category.</b>",
+
       [
         [
           {
             text:
               "📂 Categories",
+
             callback_data:
               "categories"
           }
@@ -4085,12 +4878,12 @@ async function categoryProducts(
 
 
   for (
-    const p of products
+    const product of products
   ) {
 
     const website =
       await productWebsiteUrl(
-        p.product_id,
+        product.product_id,
         env
       );
 
@@ -4101,20 +4894,25 @@ async function categoryProducts(
         {
           text:
             "📥 Get FREE PDF",
+
           callback_data:
             "openproduct:" +
-            p.product_id
+            product.product_id
         }
       ]
+
     ];
 
 
-    if (website) {
+    if (
+      website
+    ) {
 
       buttons.push([
         {
           text:
             "🌐 Website",
+
           url:
             website
         }
@@ -4125,17 +4923,19 @@ async function categoryProducts(
     await sendProductCard(
       env,
       chatId,
-      p,
+      product,
+
       "🆓 <b>FREE STUDY MATERIAL</b>",
+
       buttons
     );
   }
 }
 
 
-/* =========================================================
+/* ============================================================
    TASK ADMIN
-========================================================= */
+============================================================ */
 
 async function taskAdminMenu(
   chatId,
@@ -4147,6 +4947,7 @@ async function taskAdminMenu(
     chatId,
 
     "📋 <b>UNLOCK TASKS</b>\n\n" +
+
     "Add tasks that users must complete before receiving a PDF.",
 
     [
@@ -4154,6 +4955,7 @@ async function taskAdminMenu(
         {
           text:
             "➕ Add Task",
+
           callback_data:
             "admin_add_task"
         }
@@ -4163,6 +4965,7 @@ async function taskAdminMenu(
         {
           text:
             "🔙 Admin Panel",
+
           callback_data:
             "admin"
         }
@@ -4172,6 +4975,10 @@ async function taskAdminMenu(
 }
 
 
+/* ============================================================
+   START TASK CREATION
+============================================================ */
+
 async function startTaskCreation(
   userId,
   chatId,
@@ -4180,10 +4987,12 @@ async function startTaskCreation(
 
   await createSession(
     userId,
+
     {
       step:
         "task_product"
     },
+
     env
   );
 
@@ -4191,12 +5000,18 @@ async function startTaskCreation(
   const products =
     await sb(
       env,
+
       "/rest/v1/products" +
-        "?select=id,product_id,title" +
-        "&status=eq.active" +
-        "&deleted_at=is.null" +
-        "&order=id.desc" +
-        "&limit=50"
+
+      "?select=id,product_id,title" +
+
+      "&status=eq.active" +
+
+      "&deleted_at=is.null" +
+
+      "&order=id.desc" +
+
+      "&limit=50"
     );
 
 
@@ -4207,6 +5022,7 @@ async function startTaskCreation(
     await sendMessage(
       env,
       chatId,
+
       "❌ No products available."
     );
 
@@ -4217,17 +5033,19 @@ async function startTaskCreation(
   await sendMessage(
     env,
     chatId,
+
     "📦 <b>Choose product:</b>",
 
     products.map(
-      p => [
+      product => [
+
         {
           text:
             "📚 " +
-            p.product_id +
+            product.product_id +
             " — " +
             String(
-              p.title
+              product.title
             ).substring(
               0,
               30
@@ -4235,13 +5053,18 @@ async function startTaskCreation(
 
           callback_data:
             "select_task_product:" +
-            p.id
+            product.id
         }
+
       ]
     )
   );
 }
 
+
+/* ============================================================
+   CREATE TASK
+============================================================ */
 
 async function createTaskFromSession(
   userId,
@@ -4253,8 +5076,11 @@ async function createTaskFromSession(
 
   await sb(
     env,
+
     "/rest/v1/product_tasks",
+
     {
+
       method:
         "POST",
 
@@ -4321,6 +5147,7 @@ async function createTaskFromSession(
         {
           text:
             "📋 Tasks",
+
           callback_data:
             "admin_tasks"
         }
@@ -4330,9 +5157,9 @@ async function createTaskFromSession(
 }
 
 
-/* =========================================================
-   TASK VERIFICATION
-========================================================= */
+/* ============================================================
+   VERIFY TASK
+============================================================ */
 
 async function verifyTask(
   telegramUserId,
@@ -4344,12 +5171,15 @@ async function verifyTask(
   const tasks =
     await sb(
       env,
+
       "/rest/v1/product_tasks" +
-        "?id=eq." +
-        encodeURIComponent(
-          taskId
-        ) +
-        "&select=*"
+
+      "?id=eq." +
+      encodeURIComponent(
+        taskId
+      ) +
+
+      "&select=*"
     );
 
 
@@ -4357,11 +5187,14 @@ async function verifyTask(
     tasks[0];
 
 
-  if (!task) {
+  if (
+    !task
+  ) {
 
     await sendMessage(
       env,
       chatId,
+
       "❌ Task not found."
     );
 
@@ -4372,6 +5205,7 @@ async function verifyTask(
   if (
     task.task_type !==
       "channel" &&
+
     task.task_type !==
       "group"
   ) {
@@ -4379,6 +5213,7 @@ async function verifyTask(
     await sendMessage(
       env,
       chatId,
+
       "ℹ️ This task does not support Telegram membership verification."
     );
 
@@ -4390,11 +5225,14 @@ async function verifyTask(
     task.channel_id;
 
 
-  if (!channelId) {
+  if (
+    !channelId
+  ) {
 
     await sendMessage(
       env,
       chatId,
+
       "❌ Channel ID is not configured."
     );
 
@@ -4405,8 +5243,11 @@ async function verifyTask(
   const result =
     await telegram(
       env,
+
       "getChatMember",
+
       {
+
         chat_id:
           channelId,
 
@@ -4418,7 +5259,9 @@ async function verifyTask(
 
   if (
     result.ok &&
+
     result.result &&
+
     [
       "member",
       "administrator",
@@ -4438,6 +5281,7 @@ async function verifyTask(
     await sendMessage(
       env,
       chatId,
+
       "✅ <b>Task verified successfully.</b>"
     );
 
@@ -4446,11 +5290,17 @@ async function verifyTask(
     await sendMessage(
       env,
       chatId,
-      "❌ <b>Membership not detected yet.</b>\n\nMake sure you joined the channel/group and try again."
+
+      "❌ <b>Membership not detected yet.</b>\n\n" +
+      "Make sure you joined the channel/group and try again."
     );
   }
 }
 
+
+/* ============================================================
+   MARK TASK COMPLETE
+============================================================ */
 
 async function markTaskComplete(
   telegramUserId,
@@ -4461,16 +5311,20 @@ async function markTaskComplete(
   const existing =
     await sb(
       env,
+
       "/rest/v1/user_tasks" +
-        "?telegram_user_id=eq." +
-        encodeURIComponent(
-          telegramUserId
-        ) +
-        "&product_task_id=eq." +
-        encodeURIComponent(
-          taskId
-        ) +
-        "&select=id"
+
+      "?telegram_user_id=eq." +
+      encodeURIComponent(
+        telegramUserId
+      ) +
+
+      "&product_task_id=eq." +
+      encodeURIComponent(
+        taskId
+      ) +
+
+      "&select=id"
     );
 
 
@@ -4489,13 +5343,17 @@ async function markTaskComplete(
 
     await sb(
       env,
+
       "/rest/v1/user_tasks?id=eq." +
-        existing[0].id,
+      existing[0].id,
+
       {
+
         method:
           "PATCH",
 
         body: {
+
           completed:
             true,
 
@@ -4512,8 +5370,11 @@ async function markTaskComplete(
 
     await sb(
       env,
+
       "/rest/v1/user_tasks",
+
       {
+
         method:
           "POST",
 
@@ -4540,6 +5401,10 @@ async function markTaskComplete(
 }
 
 
+/* ============================================================
+   CHECK TASK
+============================================================ */
+
 async function isTaskCompleted(
   telegramUserId,
   taskId,
@@ -4549,27 +5414,35 @@ async function isTaskCompleted(
   const rows =
     await sb(
       env,
+
       "/rest/v1/user_tasks" +
-        "?telegram_user_id=eq." +
-        encodeURIComponent(
-          telegramUserId
-        ) +
-        "&product_task_id=eq." +
-        encodeURIComponent(
-          taskId
-        ) +
-        "&completed=eq.true" +
-        "&select=id"
+
+      "?telegram_user_id=eq." +
+      encodeURIComponent(
+        telegramUserId
+      ) +
+
+      "&product_task_id=eq." +
+      encodeURIComponent(
+        taskId
+      ) +
+
+      "&completed=eq.true" +
+
+      "&select=id"
     );
 
 
-  return rows.length > 0;
+  return (
+    rows.length >
+    0
+  );
 }
 
 
-/* =========================================================
+/* ============================================================
    REFERRALS
-========================================================= */
+============================================================ */
 
 async function processReferralStart(
   referredUserId,
@@ -4588,9 +5461,11 @@ async function processReferralStart(
     !Number.isSafeInteger(
       referrer
     ) ||
+
     referrer ===
       referredUserId
   ) {
+
     return;
   }
 
@@ -4602,7 +5477,10 @@ async function processReferralStart(
     );
 
 
-  if (!product) {
+  if (
+    !product
+  ) {
+
     return;
   }
 
@@ -4610,32 +5488,41 @@ async function processReferralStart(
   const existing =
     await sb(
       env,
+
       "/rest/v1/referrals" +
-        "?referrer_telegram_user_id=eq." +
-        encodeURIComponent(
-          referrer
-        ) +
-        "&referred_telegram_user_id=eq." +
-        encodeURIComponent(
-          referredUserId
-        ) +
-        "&product_id=eq." +
-        product.id +
-        "&select=id"
+
+      "?referrer_telegram_user_id=eq." +
+      encodeURIComponent(
+        referrer
+      ) +
+
+      "&referred_telegram_user_id=eq." +
+      encodeURIComponent(
+        referredUserId
+      ) +
+
+      "&product_id=eq." +
+      product.id +
+
+      "&select=id"
     );
 
 
   if (
     existing.length
   ) {
+
     return;
   }
 
 
   await sb(
     env,
+
     "/rest/v1/referrals",
+
     {
+
       method:
         "POST",
 
@@ -4669,6 +5556,10 @@ async function processReferralStart(
 }
 
 
+/* ============================================================
+   REFERRAL COUNT
+============================================================ */
+
 async function countSuccessfulReferrals(
   telegramUserId,
   productDbId,
@@ -4678,15 +5569,20 @@ async function countSuccessfulReferrals(
   const rows =
     await sb(
       env,
+
       "/rest/v1/referrals" +
-        "?referrer_telegram_user_id=eq." +
-        encodeURIComponent(
-          telegramUserId
-        ) +
-        "&product_id=eq." +
-        productDbId +
-        "&status=eq.completed" +
-        "&select=id"
+
+      "?referrer_telegram_user_id=eq." +
+      encodeURIComponent(
+        telegramUserId
+      ) +
+
+      "&product_id=eq." +
+      productDbId +
+
+      "&status=eq.completed" +
+
+      "&select=id"
     );
 
 
@@ -4694,9 +5590,9 @@ async function countSuccessfulReferrals(
 }
 
 
-/* =========================================================
+/* ============================================================
    CHANNEL VERIFICATION
-========================================================= */
+============================================================ */
 
 async function verifyRequiredChannel(
   userId,
@@ -4705,13 +5601,17 @@ async function verifyRequiredChannel(
 
   const channelId =
     env.CHANNEL_ID ||
+
     await getSetting(
       "channel_id",
       env
     );
 
 
-  if (!channelId) {
+  if (
+    !channelId
+  ) {
+
     return true;
   }
 
@@ -4719,8 +5619,11 @@ async function verifyRequiredChannel(
   const result =
     await telegram(
       env,
+
       "getChatMember",
+
       {
+
         chat_id:
           channelId,
 
@@ -4730,57 +5633,74 @@ async function verifyRequiredChannel(
     );
 
 
-  if (!result.ok) {
+  if (
+    !result.ok
+  ) {
+
     return false;
   }
 
 
   return [
+
     "member",
     "administrator",
     "creator"
+
   ].includes(
     result.result?.status
   );
 }
 
 
-/* =========================================================
+/* ============================================================
    SEARCH
-========================================================= */
+============================================================ */
 
 async function telegramSearch(
   chatId,
-  q,
+  query,
   env
 ) {
 
   const products =
     await sb(
       env,
+
       "/rest/v1/products" +
-        "?select=id,product_id,title,description,price,product_type,cover_image" +
-        "&status=eq.active" +
-        "&deleted_at=is.null" +
-        "&or=(" +
-          "title.ilike.*" +
-          encodeURIComponent(
-            q
-          ) +
-          "*," +
-          "description.ilike.*" +
-          encodeURIComponent(
-            q
-          ) +
-          "*," +
-          "product_id.ilike.*" +
-          encodeURIComponent(
-            q
-          ) +
-          "*" +
-        ")" +
-        "&order=id.desc" +
-        "&limit=10"
+
+      "?select=id,product_id,title,description,price,product_type,cover_image" +
+
+      "&status=eq.active" +
+
+      "&deleted_at=is.null" +
+
+      "&or=(" +
+
+      "title.ilike.*" +
+      encodeURIComponent(
+        query
+      ) +
+      "*," +
+
+      "description.ilike.*" +
+      encodeURIComponent(
+        query
+      ) +
+      "*," +
+
+      "product_id.ilike.*" +
+      encodeURIComponent(
+        query
+      ) +
+
+      "*" +
+
+      ")" +
+
+      "&order=id.desc" +
+
+      "&limit=10"
     );
 
 
@@ -4791,6 +5711,7 @@ async function telegramSearch(
     await sendMessage(
       env,
       chatId,
+
       "❌ <b>No products found.</b>"
     );
 
@@ -4799,12 +5720,12 @@ async function telegramSearch(
 
 
   for (
-    const p of products
+    const product of products
   ) {
 
     const website =
       await productWebsiteUrl(
-        p.product_id,
+        product.product_id,
         env
       );
 
@@ -4815,20 +5736,25 @@ async function telegramSearch(
         {
           text:
             "📥 Get FREE PDF",
+
           callback_data:
             "openproduct:" +
-            p.product_id
+            product.product_id
         }
       ]
+
     ];
 
 
-    if (website) {
+    if (
+      website
+    ) {
 
       buttons.push([
         {
           text:
             "🌐 Open Website",
+
           url:
             website
         }
@@ -4839,17 +5765,19 @@ async function telegramSearch(
     await sendProductCard(
       env,
       chatId,
-      p,
+      product,
+
       "🆓 <b>FREE STUDY MATERIAL</b>",
+
       buttons
     );
   }
 }
 
 
-/* =========================================================
-   LATEST PRODUCTS
-========================================================= */
+/* ============================================================
+   LATEST
+============================================================ */
 
 async function latestProducts(
   chatId,
@@ -4859,12 +5787,18 @@ async function latestProducts(
   const products =
     await sb(
       env,
+
       "/rest/v1/products" +
-        "?select=id,product_id,title,description,price,product_type,cover_image" +
-        "&status=eq.active" +
-        "&deleted_at=is.null" +
-        "&order=created_at.desc" +
-        "&limit=10"
+
+      "?select=id,product_id,title,description,price,product_type,cover_image" +
+
+      "&status=eq.active" +
+
+      "&deleted_at=is.null" +
+
+      "&order=created_at.desc" +
+
+      "&limit=10"
     );
 
 
@@ -4875,6 +5809,7 @@ async function latestProducts(
     await sendMessage(
       env,
       chatId,
+
       "📚 <b>No products available yet.</b>"
     );
 
@@ -4883,12 +5818,12 @@ async function latestProducts(
 
 
   for (
-    const p of products
+    const product of products
   ) {
 
     const website =
       await productWebsiteUrl(
-        p.product_id,
+        product.product_id,
         env
       );
 
@@ -4899,20 +5834,25 @@ async function latestProducts(
         {
           text:
             "📥 Get FREE PDF",
+
           callback_data:
             "openproduct:" +
-            p.product_id
+            product.product_id
         }
       ]
+
     ];
 
 
-    if (website) {
+    if (
+      website
+    ) {
 
       buttons.push([
         {
           text:
             "🌐 Website",
+
           url:
             website
         }
@@ -4923,17 +5863,20 @@ async function latestProducts(
     await sendProductCard(
       env,
       chatId,
-      p,
-      "✨ <b>Latest Study Material</b>\n\n🆓 FREE",
+      product,
+
+      "✨ <b>Latest Study Material</b>\n\n" +
+      "🆓 FREE",
+
       buttons
     );
   }
 }
 
 
-/* =========================================================
-   USER MANAGEMENT
-========================================================= */
+/* ============================================================
+   USER
+============================================================ */
 
 async function touchUser(
   user,
@@ -4952,12 +5895,15 @@ async function touchUser(
   const existing =
     await sb(
       env,
+
       "/rest/v1/users" +
-        "?telegram_user_id=eq." +
-        encodeURIComponent(
-          user.id
-        ) +
-        "&select=id"
+
+      "?telegram_user_id=eq." +
+      encodeURIComponent(
+        user.id
+      ) +
+
+      "&select=id"
     );
 
 
@@ -4967,9 +5913,12 @@ async function touchUser(
 
     await sb(
       env,
+
       "/rest/v1/users?id=eq." +
-        existing[0].id,
+      existing[0].id,
+
       {
+
         method:
           "PATCH",
 
@@ -4996,8 +5945,11 @@ async function touchUser(
 
     await sb(
       env,
+
       "/rest/v1/users",
+
       {
+
         method:
           "POST",
 
@@ -5026,6 +5978,10 @@ async function touchUser(
 }
 
 
+/* ============================================================
+   UPDATE USER PRODUCT
+============================================================ */
+
 async function updateUserProduct(
   userId,
   productDbId,
@@ -5034,12 +5990,16 @@ async function updateUserProduct(
 
   await sb(
     env,
+
     "/rest/v1/users" +
-      "?telegram_user_id=eq." +
-      encodeURIComponent(
-        userId
-      ),
+
+    "?telegram_user_id=eq." +
+    encodeURIComponent(
+      userId
+    ),
+
     {
+
       method:
         "PATCH",
 
@@ -5064,6 +6024,10 @@ async function updateUserProduct(
 }
 
 
+/* ============================================================
+   USER STATISTICS
+============================================================ */
+
 async function userStatistics(
   chatId,
   env
@@ -5079,10 +6043,14 @@ async function userStatistics(
   const products =
     await sb(
       env,
+
       "/rest/v1/products" +
-        "?status=eq.active" +
-        "&deleted_at=is.null" +
-        "&select=id"
+
+      "?status=eq.active" +
+
+      "&deleted_at=is.null" +
+
+      "&select=id"
     );
 
 
@@ -5115,6 +6083,7 @@ async function userStatistics(
         {
           text:
             "🔙 Admin Panel",
+
           callback_data:
             "admin"
         }
@@ -5124,9 +6093,9 @@ async function userStatistics(
 }
 
 
-/* =========================================================
+/* ============================================================
    ADMIN MANAGEMENT
-========================================================= */
+============================================================ */
 
 async function adminManagement(
   chatId,
@@ -5136,9 +6105,12 @@ async function adminManagement(
   const admins =
     await sb(
       env,
+
       "/rest/v1/admins" +
-        "?select=id,telegram_user_id,name,role,status" +
-        "&order=id.asc"
+
+      "?select=id,telegram_user_id,name,role,status" +
+
+      "&order=id.asc"
     );
 
 
@@ -5150,22 +6122,27 @@ async function adminManagement(
 
 
   for (
-    const a of admins
+    const admin of admins
   ) {
 
     text +=
+
       "• <code>" +
-      a.telegram_user_id +
+      admin.telegram_user_id +
       "</code> — " +
+
       escapeHtml(
-        a.name ||
+        admin.name ||
         "Admin"
       ) +
+
       " (" +
+
       escapeHtml(
-        a.role ||
+        admin.role ||
         "admin"
       ) +
+
       ")\n";
 
 
@@ -5173,11 +6150,11 @@ async function adminManagement(
       {
         text:
           "🗑 Remove " +
-          a.telegram_user_id,
+          admin.telegram_user_id,
 
         callback_data:
           "remove_admin:" +
-          a.id
+          admin.id
       }
     ]);
   }
@@ -5187,6 +6164,7 @@ async function adminManagement(
     {
       text:
         "➕ Add Admin",
+
       callback_data:
         "admin_add_admin"
     }
@@ -5197,6 +6175,7 @@ async function adminManagement(
     {
       text:
         "🔙 Admin Panel",
+
       callback_data:
         "admin"
     }
@@ -5212,6 +6191,10 @@ async function adminManagement(
 }
 
 
+/* ============================================================
+   START ADMIN
+============================================================ */
+
 async function startAdminCreation(
   userId,
   chatId,
@@ -5220,10 +6203,12 @@ async function startAdminCreation(
 
   await createSession(
     userId,
+
     {
       step:
         "admin_user_id"
     },
+
     env
   );
 
@@ -5231,10 +6216,17 @@ async function startAdminCreation(
   await sendMessage(
     env,
     chatId,
-    "👤 <b>Add Admin</b>\n\nEnter Telegram User ID:"
+
+    "👤 <b>Add Admin</b>\n\n" +
+
+    "Enter Telegram User ID:"
   );
 }
 
+
+/* ============================================================
+   REMOVE ADMIN
+============================================================ */
 
 async function removeAdmin(
   id,
@@ -5245,17 +6237,20 @@ async function removeAdmin(
   const rows =
     await sb(
       env,
+
       "/rest/v1/admins?id=eq." +
-        encodeURIComponent(
-          id
-        ) +
-        "&select=telegram_user_id"
+      encodeURIComponent(
+        id
+      ) +
+
+      "&select=telegram_user_id"
     );
 
 
   if (
     !rows.length
   ) {
+
     return;
   }
 
@@ -5276,6 +6271,7 @@ async function removeAdmin(
     await sendMessage(
       env,
       chatId,
+
       "⛔ <b>Owner cannot be removed.</b>"
     );
 
@@ -5285,10 +6281,12 @@ async function removeAdmin(
 
   await sb(
     env,
+
     "/rest/v1/admins?id=eq." +
-      encodeURIComponent(
-        id
-      ),
+    encodeURIComponent(
+      id
+    ),
+
     {
       method:
         "DELETE"
@@ -5299,14 +6297,15 @@ async function removeAdmin(
   await sendMessage(
     env,
     chatId,
+
     "✅ <b>Admin removed.</b>"
   );
 }
 
 
-/* =========================================================
-   SETTINGS
-========================================================= */
+/* ============================================================
+   WEBSITE SETTING
+============================================================ */
 
 async function startWebsiteSetting(
   userId,
@@ -5316,10 +6315,12 @@ async function startWebsiteSetting(
 
   await createSession(
     userId,
+
     {
       step:
         "website_url"
     },
+
     env
   );
 
@@ -5338,15 +6339,26 @@ async function startWebsiteSetting(
     "🌐 <b>Website Settings</b>\n\n" +
 
     "Current:\n" +
+
     escapeHtml(
       current ||
       "Not configured"
     ) +
 
-    "\n\nSend your website base URL.\n\nExample:\n<code>https://example.com</code>"
+    "\n\n" +
+
+    "Send your website base URL.\n\n" +
+
+    "Example:\n" +
+
+    "<code>https://example.com</code>"
   );
 }
 
+
+/* ============================================================
+   CONTACT SETTING
+============================================================ */
 
 async function startContactSetting(
   userId,
@@ -5356,10 +6368,12 @@ async function startContactSetting(
 
   await createSession(
     userId,
+
     {
       step:
         "contact_admin"
     },
+
     env
   );
 
@@ -5378,19 +6392,24 @@ async function startContactSetting(
     "👤 <b>Contact Admin</b>\n\n" +
 
     "Current:\n" +
+
     escapeHtml(
       current ||
       "Not configured"
     ) +
 
-    "\n\nExample:\n<code>@yourusername</code>"
+    "\n\n" +
+
+    "Example:\n" +
+
+    "<code>@yourusername</code>"
   );
 }
 
 
-/* =========================================================
-   WEBSITE API
-========================================================= */
+/* ============================================================
+   API PRODUCTS
+============================================================ */
 
 async function apiProducts(
   env
@@ -5399,11 +6418,16 @@ async function apiProducts(
   const products =
     await sb(
       env,
+
       "/rest/v1/products" +
-        "?select=id,product_id,title,description,price,product_type,file_name,file_size,mime_type,cover_image,category_id,status,created_at,updated_at" +
-        "&status=eq.active" +
-        "&deleted_at=is.null" +
-        "&order=created_at.desc"
+
+      "?select=id,product_id,title,description,price,product_type,file_name,file_size,mime_type,cover_image,category_id,status,created_at,updated_at" +
+
+      "&status=eq.active" +
+
+      "&deleted_at=is.null" +
+
+      "&order=created_at.desc"
     );
 
 
@@ -5416,9 +6440,9 @@ async function apiProducts(
 
   const data =
     products.map(
-      p => ({
+      product => ({
 
-        ...p,
+        ...product,
 
         price:
           0,
@@ -5426,16 +6450,18 @@ async function apiProducts(
         website_url:
           buildProductUrl(
             website,
-            p.product_id
+            product.product_id
           ),
 
         telegram_url:
           null
+
       })
     );
 
 
   return json({
+
     ok:
       true,
 
@@ -5444,6 +6470,10 @@ async function apiProducts(
   });
 }
 
+
+/* ============================================================
+   API PRODUCT
+============================================================ */
 
 async function apiProduct(
   env,
@@ -5465,6 +6495,7 @@ async function apiProduct(
   ) {
 
     return json(
+
       {
         ok:
           false,
@@ -5472,6 +6503,7 @@ async function apiProduct(
         error:
           "Product not found"
       },
+
       404
     );
   }
@@ -5492,6 +6524,7 @@ async function apiProduct(
 
 
   return json({
+
     ok:
       true,
 
@@ -5538,28 +6571,29 @@ async function apiProduct(
 
       tasks:
         tasks.map(
-          t => ({
+          task => ({
 
             id:
-              t.id,
+              task.id,
 
             task_type:
-              t.task_type,
+              task.task_type,
 
             title:
-              t.title,
+              task.title,
 
             description:
-              t.description,
+              task.description,
 
             task_url:
-              t.task_url,
+              task.task_url,
 
             required_count:
-              t.required_count,
+              task.required_count,
 
             required:
-              t.required
+              task.required
+
           })
         )
     }
@@ -5567,16 +6601,21 @@ async function apiProduct(
 }
 
 
+/* ============================================================
+   API SEARCH
+============================================================ */
+
 async function apiSearch(
   env,
-  q
+  query
 ) {
 
   if (
-    !q.trim()
+    !query.trim()
   ) {
 
     return json({
+
       ok:
         true,
 
@@ -5589,28 +6628,39 @@ async function apiSearch(
   const products =
     await sb(
       env,
+
       "/rest/v1/products" +
-        "?select=id,product_id,title,description,price,product_type,cover_image" +
-        "&status=eq.active" +
-        "&deleted_at=is.null" +
-        "&or=(" +
-          "title.ilike.*" +
-          encodeURIComponent(
-            q
-          ) +
-          "*," +
-          "description.ilike.*" +
-          encodeURIComponent(
-            q
-          ) +
-          "*," +
-          "product_id.ilike.*" +
-          encodeURIComponent(
-            q
-          ) +
-          "*" +
-        ")" +
-        "&limit=30"
+
+      "?select=id,product_id,title,description,price,product_type,cover_image" +
+
+      "&status=eq.active" +
+
+      "&deleted_at=is.null" +
+
+      "&or=(" +
+
+      "title.ilike.*" +
+      encodeURIComponent(
+        query
+      ) +
+      "*," +
+
+      "description.ilike.*" +
+      encodeURIComponent(
+        query
+      ) +
+      "*," +
+
+      "product_id.ilike.*" +
+      encodeURIComponent(
+        query
+      ) +
+
+      "*" +
+
+      ")" +
+
+      "&limit=30"
     );
 
 
@@ -5628,9 +6678,9 @@ async function apiSearch(
 
     products:
       products.map(
-        p => ({
+        product => ({
 
-          ...p,
+          ...product,
 
           price:
             0,
@@ -5638,13 +6688,17 @@ async function apiSearch(
           website_url:
             buildProductUrl(
               website,
-              p.product_id
+              product.product_id
             )
         })
       )
   });
 }
 
+
+/* ============================================================
+   API SETTINGS
+============================================================ */
 
 async function apiSettings(
   env
@@ -5670,9 +6724,9 @@ async function apiSettings(
 }
 
 
-/* =========================================================
+/* ============================================================
    PRODUCT HELPERS
-========================================================= */
+============================================================ */
 
 async function getProductByProductId(
   productId,
@@ -5682,12 +6736,15 @@ async function getProductByProductId(
   const rows =
     await sb(
       env,
+
       "/rest/v1/products" +
-        "?product_id=eq." +
-        encodeURIComponent(
-          productId
-        ) +
-        "&select=*"
+
+      "?product_id=eq." +
+      encodeURIComponent(
+        productId
+      ) +
+
+      "&select=*"
     );
 
 
@@ -5705,17 +6762,26 @@ async function getProductTasks(
 
   return await sb(
     env,
+
     "/rest/v1/product_tasks" +
-      "?product_id=eq." +
-      encodeURIComponent(
-        productDbId
-      ) +
-      "&status=eq.active" +
-      "&select=*" +
-      "&order=sort_order.asc,id.asc"
+
+    "?product_id=eq." +
+    encodeURIComponent(
+      productDbId
+    ) +
+
+    "&status=eq.active" +
+
+    "&select=*" +
+
+    "&order=sort_order.asc,id.asc"
   );
 }
 
+
+/* ============================================================
+   WEBSITE URL
+============================================================ */
 
 async function productWebsiteUrl(
   productId,
@@ -5741,18 +6807,24 @@ function buildProductUrl(
   productId
 ) {
 
-  if (!base) {
+  if (
+    !base
+  ) {
+
     return null;
   }
 
 
   return (
+
     String(base)
       .replace(
         /\/+$/,
         ""
       ) +
+
     "/product/" +
+
     encodeURIComponent(
       productId
     )
@@ -5760,9 +6832,9 @@ function buildProductUrl(
 }
 
 
-/* =========================================================
+/* ============================================================
    SESSIONS
-========================================================= */
+============================================================ */
 
 async function getSession(
   userId,
@@ -5772,12 +6844,15 @@ async function getSession(
   const rows =
     await sb(
       env,
+
       "/rest/v1/bot_sessions" +
-        "?telegram_user_id=eq." +
-        encodeURIComponent(
-          userId
-        ) +
-        "&select=*"
+
+      "?telegram_user_id=eq." +
+      encodeURIComponent(
+        userId
+      ) +
+
+      "&select=*"
     );
 
 
@@ -5825,16 +6900,22 @@ async function createSession(
   };
 
 
-  if (existing) {
+  if (
+    existing
+  ) {
 
     await sb(
       env,
+
       "/rest/v1/bot_sessions" +
-        "?telegram_user_id=eq." +
-        encodeURIComponent(
-          userId
-        ),
+
+      "?telegram_user_id=eq." +
+      encodeURIComponent(
+        userId
+      ),
+
       {
+
         method:
           "PATCH",
 
@@ -5847,8 +6928,11 @@ async function createSession(
 
     await sb(
       env,
+
       "/rest/v1/bot_sessions",
+
       {
+
         method:
           "POST",
 
@@ -5881,12 +6965,16 @@ async function clearSession(
 
   await sb(
     env,
+
     "/rest/v1/bot_sessions" +
-      "?telegram_user_id=eq." +
-      encodeURIComponent(
-        userId
-      ),
+
+    "?telegram_user_id=eq." +
+    encodeURIComponent(
+      userId
+    ),
+
     {
+
       method:
         "DELETE"
     }
@@ -5894,9 +6982,9 @@ async function clearSession(
 }
 
 
-/* =========================================================
+/* ============================================================
    ADMIN PERMISSIONS
-========================================================= */
+============================================================ */
 
 async function isAdmin(
   userId,
@@ -5909,6 +6997,7 @@ async function isAdmin(
       env.ADMIN_TELEGRAM_ID
     )
   ) {
+
     return true;
   }
 
@@ -5916,18 +7005,23 @@ async function isAdmin(
   const rows =
     await sb(
       env,
+
       "/rest/v1/admins" +
-        "?telegram_user_id=eq." +
-        encodeURIComponent(
-          userId
-        ) +
-        "&status=eq.active" +
-        "&select=id"
+
+      "?telegram_user_id=eq." +
+      encodeURIComponent(
+        userId
+      ) +
+
+      "&status=eq.active" +
+
+      "&select=id"
     );
 
 
   return (
-    rows.length > 0
+    rows.length >
+    0
   );
 }
 
@@ -5944,6 +7038,7 @@ async function can(
       env.ADMIN_TELEGRAM_ID
     )
   ) {
+
     return true;
   }
 
@@ -5951,19 +7046,24 @@ async function can(
   const rows =
     await sb(
       env,
+
       "/rest/v1/admins" +
-        "?telegram_user_id=eq." +
-        encodeURIComponent(
-          userId
-        ) +
-        "&status=eq.active" +
-        "&select=role"
+
+      "?telegram_user_id=eq." +
+      encodeURIComponent(
+        userId
+      ) +
+
+      "&status=eq.active" +
+
+      "&select=role"
     );
 
 
   if (
     !rows.length
   ) {
+
     return false;
   }
 
@@ -5976,6 +7076,7 @@ async function can(
     role === "owner" ||
     role === "admin"
   ) {
+
     return true;
   }
 
@@ -5984,6 +7085,7 @@ async function can(
     type === "product" &&
     role === "product_admin"
   ) {
+
     return true;
   }
 
@@ -5992,6 +7094,7 @@ async function can(
     type === "task" &&
     role === "task_admin"
   ) {
+
     return true;
   }
 
@@ -6000,6 +7103,7 @@ async function can(
     type === "user" &&
     role === "user_admin"
   ) {
+
     return true;
   }
 
@@ -6008,9 +7112,9 @@ async function can(
 }
 
 
-/* =========================================================
+/* ============================================================
    CLEANUP
-========================================================= */
+============================================================ */
 
 async function cleanupExpired(
   env
@@ -6020,8 +7124,11 @@ async function cleanupExpired(
 
     await sb(
       env,
+
       "/rest/v1/rpc/cleanup_expired_data",
+
       {
+
         method:
           "POST",
 
@@ -6035,19 +7142,19 @@ async function cleanupExpired(
       "Expired temporary data cleaned."
     );
 
-  } catch (e) {
+  } catch (error) {
 
     console.error(
       "Cleanup failed:",
-      e
+      error
     );
   }
 }
 
 
-/* =========================================================
-   SETTINGS HELPERS
-========================================================= */
+/* ============================================================
+   SETTINGS
+============================================================ */
 
 async function getSetting(
   key,
@@ -6057,12 +7164,15 @@ async function getSetting(
   const rows =
     await sb(
       env,
+
       "/rest/v1/settings" +
-        "?key=eq." +
-        encodeURIComponent(
-          key
-        ) +
-        "&select=value"
+
+      "?key=eq." +
+      encodeURIComponent(
+        key
+      ) +
+
+      "&select=value"
     );
 
 
@@ -6079,15 +7189,37 @@ async function setSetting(
   env
 ) {
 
-  const rows =
+  const existing =
     await sb(
       env,
+
       "/rest/v1/settings" +
-        "?key=eq." +
-        encodeURIComponent(
-          key
-        ),
+
+      "?key=eq." +
+      encodeURIComponent(
+        key
+      ) +
+
+      "&select=id"
+    );
+
+
+  if (
+    existing.length
+  ) {
+
+    await sb(
+      env,
+
+      "/rest/v1/settings" +
+
+      "?key=eq." +
+      encodeURIComponent(
+        key
+      ),
+
       {
+
         method:
           "PATCH",
 
@@ -6102,19 +7234,20 @@ async function setSetting(
       }
     );
 
-
-  if (
-    !rows.length
-  ) {
+  } else {
 
     await sb(
       env,
+
       "/rest/v1/settings",
+
       {
+
         method:
           "POST",
 
         body: {
+
           key:
             key,
 
@@ -6127,9 +7260,9 @@ async function setSetting(
 }
 
 
-/* =========================================================
+/* ============================================================
    TELEGRAM API
-========================================================= */
+============================================================ */
 
 async function telegram(
   env,
@@ -6139,15 +7272,19 @@ async function telegram(
 
   const response =
     await fetch(
-      TG +
-        env.BOT_TOKEN +
-        "/" +
-        method,
+
+      TELEGRAM_API +
+      env.BOT_TOKEN +
+      "/" +
+      method,
+
       {
+
         method:
           "POST",
 
         headers: {
+
           "Content-Type":
             "application/json"
         },
@@ -6164,7 +7301,9 @@ async function telegram(
 }
 
 
-/* SEND MESSAGE */
+/* ============================================================
+   SEND MESSAGE
+============================================================ */
 
 async function sendMessage(
   env,
@@ -6209,7 +7348,9 @@ async function sendMessage(
 }
 
 
-/* SEND PHOTO */
+/* ============================================================
+   SEND PHOTO
+============================================================ */
 
 async function sendPhoto(
   env,
@@ -6255,7 +7396,9 @@ async function sendPhoto(
 }
 
 
-/* SEND DOCUMENT */
+/* ============================================================
+   SEND DOCUMENT
+============================================================ */
 
 async function sendDocument(
   env,
@@ -6264,33 +7407,42 @@ async function sendDocument(
   caption
 ) {
 
+  const body = {
+
+    chat_id:
+      chatId,
+
+    document:
+      fileId,
+
+    parse_mode:
+      "HTML"
+  };
+
+
+  if (
+    caption
+  ) {
+
+    body.caption =
+      "📚 " +
+      escapeHtml(
+        caption
+      );
+  }
+
+
   return await telegram(
     env,
     "sendDocument",
-    {
-
-      chat_id:
-        chatId,
-
-      document:
-        fileId,
-
-      caption:
-        caption
-          ? "📚 " +
-            escapeHtml(
-              caption
-            )
-          : undefined,
-
-      parse_mode:
-        "HTML"
-    }
+    body
   );
 }
 
 
-/* CALLBACK ANSWER */
+/* ============================================================
+   CALLBACK ANSWER
+============================================================ */
 
 async function answerCallbackQuery(
   env,
@@ -6299,7 +7451,9 @@ async function answerCallbackQuery(
 
   return await telegram(
     env,
+
     "answerCallbackQuery",
+
     {
       callback_query_id:
         callbackId
@@ -6308,7 +7462,9 @@ async function answerCallbackQuery(
 }
 
 
-/* BOT USERNAME */
+/* ============================================================
+   BOT USERNAME
+============================================================ */
 
 async function getBotUsername(
   env
@@ -6317,7 +7473,9 @@ async function getBotUsername(
   const result =
     await telegram(
       env,
+
       "getMe",
+
       {}
     );
 
@@ -6329,9 +7487,9 @@ async function getBotUsername(
 }
 
 
-/* =========================================================
+/* ============================================================
    SUPABASE
-========================================================= */
+============================================================ */
 
 async function sb(
   env,
@@ -6340,6 +7498,7 @@ async function sb(
 ) {
 
   const {
+
     method =
       "GET",
 
@@ -6348,6 +7507,7 @@ async function sb(
 
     returnData =
       false
+
   } = options;
 
 
@@ -6384,9 +7544,11 @@ async function sb(
         /\/+$/,
         ""
       ) +
+
       path,
 
       {
+
         method:
           method,
 
@@ -6395,9 +7557,11 @@ async function sb(
 
         body:
           body !== undefined
+
             ? JSON.stringify(
                 body
               )
+
             : undefined
       }
     );
@@ -6412,15 +7576,20 @@ async function sb(
   ) {
 
     throw new Error(
+
       "Supabase " +
       response.status +
       ": " +
       text
+
     );
   }
 
 
-  if (!text) {
+  if (
+    !text
+  ) {
+
     return [];
   }
 
@@ -6438,9 +7607,9 @@ async function sb(
 }
 
 
-/* =========================================================
-   UTILITY
-========================================================= */
+/* ============================================================
+   JSON RESPONSE
+============================================================ */
 
 function json(
   data,
@@ -6448,10 +7617,13 @@ function json(
 ) {
 
   return new Response(
+
     JSON.stringify(
       data
     ),
+
     {
+
       status:
 
         status,
@@ -6471,6 +7643,10 @@ function json(
   );
 }
 
+
+/* ============================================================
+   HTML ESCAPE
+============================================================ */
 
 function escapeHtml(
   value
@@ -6501,6 +7677,10 @@ function escapeHtml(
     );
 }
 
+
+/* ============================================================
+   SLUG
+============================================================ */
 
 function slugify(
   value
