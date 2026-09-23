@@ -2123,7 +2123,7 @@ async function handleProductCover(message, session, env) {
   const raw = String(message.text || "").trim();
   let cover = null;
   if (message.photo && message.photo.length) cover = message.photo[message.photo.length - 1].file_id;
-  else if (/^https?:\\/\\//i.test(raw)) cover = raw;
+  else if (/^https?:\/\//i.test(raw)) cover = raw;
   else if (raw.toLowerCase() !== "skip") {
     await sendMessage(chatId, "❌ Send a photo, image URL, or skip.", env);
     return true;
@@ -2878,7 +2878,7 @@ async function handleSessionText(message, session, env) {
     case "post_thumbnail": {
       const raw=String(message.text||"").trim(); let patch={step:"post_faq",post_thumbnail_url:null,post_thumbnail_file_id:null};
       if(message.photo&&message.photo.length) patch.post_thumbnail_file_id=message.photo[message.photo.length-1].file_id;
-      else if(/^https?:\\/\\//i.test(raw)) patch.post_thumbnail_url=raw;
+      else if(/^https?:\/\//i.test(raw)) patch.post_thumbnail_url=raw;
       else if(raw.toLowerCase()!=="skip"){await sendMessage(chatId,"❌ Send photo, image URL or skip.",env);return true;}
       await updateSession(env,chatId,patch); await sendMessage(chatId,"Step 5 — FAQ JSON or Q | A lines, or skip.",env); return true;
     }
@@ -2900,7 +2900,7 @@ async function handleSessionText(message, session, env) {
     case "admin_role": { const role=String(message.text||"admin").trim().toLowerCase(); if(!["admin","product_admin","task_admin","user_admin"].includes(role)){await sendMessage(chatId,"❌ Invalid role.",env);return true;} await sbInsert(env,"admins",{telegram_user_id:session.new_admin_user_id,name:session.new_admin_name,role,status:"active"}); await clearSession(chatId,env); await adminAdmins(chatId,env); return true; }
 
     case "link_title": { const title=String(message.text||"").trim(); await updateSession(env,chatId,{step:"link_url",new_link_title:title}); await sendMessage(chatId,"Send full URL.",env); return true; }
-    case "link_url": { const url=String(message.text||"").trim(); if(!/^https?:\\/\\//i.test(url)){await sendMessage(chatId,"❌ Valid http(s) URL required.",env);return true;} await updateSession(env,chatId,{step:"link_type",new_link_url:url}); await sendMessage(chatId,"Type: telegram, website, youtube, instagram or custom.",env); return true; }
+    case "link_url": { const url=String(message.text||"").trim(); if(!/^https?:\/\//i.test(url)){await sendMessage(chatId,"❌ Valid http(s) URL required.",env);return true;} await updateSession(env,chatId,{step:"link_type",new_link_url:url}); await sendMessage(chatId,"Type: telegram, website, youtube, instagram or custom.",env); return true; }
     case "link_type": { const type=String(message.text||"custom").trim().toLowerCase(); if(!["telegram","website","youtube","instagram","custom"].includes(type)){await sendMessage(chatId,"❌ Invalid type.",env);return true;} await sbInsert(env,"site_links",{title:session.new_link_title,url:session.new_link_url,link_type:type,placement:"footer",sort_order:0,status:"active"}); await clearSession(chatId,env); await adminSiteLinks(chatId,env); return true; }
     case "product_upload":
       if (await canAdmin(chatId, "product", env)) {
