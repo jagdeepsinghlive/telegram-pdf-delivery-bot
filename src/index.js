@@ -28,27 +28,7 @@ export default {
         return corsResponse("", 204);
       }
 
-      // Public SEO-first storefront.
-      if (request.method === "GET" && url.pathname === "/") {
-        return await websiteHome(request, env);
-      }
-
-      if (request.method === "GET" && url.pathname === "/robots.txt") {
-        return await websiteRobots(request, env);
-      }
-
-      if (request.method === "GET" && url.pathname === "/sitemap.xml") {
-        return await websiteSitemap(request, env);
-      }
-
-      if (request.method === "GET" && url.pathname === "/health") {
-        return json({
-          ok: true,
-          status: "healthy",
-          service: "PDF ORBIT Worker",
-          time: new Date().toISOString()
-        });
-      }
+      // Worker is backend/API only. The public website and /admin UI are hosted separately by the owner.
 
       // Public website APIs
       if (request.method === "GET" && url.pathname === "/api/products") {
@@ -99,19 +79,6 @@ export default {
           url.pathname.substring("/api/product/".length)
         );
         return await apiProduct(env, productId);
-      }
-
-      // Web Admin Panel
-      if (request.method === "GET" && url.pathname === "/admin") {
-        return await adminPanelPage(request, env);
-      }
-
-      if (request.method === "POST" && url.pathname === "/api/admin/login") {
-        return await adminLogin(request, env);
-      }
-
-      if (url.pathname.startsWith("/api/admin/")) {
-        return await adminApi(request, env, url);
       }
 
       // Telegram webhook
