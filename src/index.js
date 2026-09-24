@@ -19,6 +19,12 @@
 const TG = "https://api.telegram.org";
 import { handlePlatform } from "./platform.js";
 
+const BRAND = "Tele PDF";
+const BOT_USERNAME_FALLBACK = "telepdfsbot";
+const CHANNEL_USERNAME_FALLBACK = "telepdfs";
+const WEBSITE_URL_FALLBACK = "https://telepdfs.blogspot.com";
+
+
 export default {
   async fetch(request, env, ctx) {
     try {
@@ -1155,7 +1161,8 @@ async function startReferralOrDelivery(chatId, product, env) {
 
       const botUsername =
         env.BOT_USERNAME ||
-        "telepdfsbot";
+        (await getSetting(env, "telegram_username")) ||
+        BOT_USERNAME_FALLBACK;
 
       const link =
         `https://t.me/${botUsername}` +
