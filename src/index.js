@@ -830,6 +830,10 @@ async function sendProductCard(chatId, product, env) {
         {
           text: "⭐ Save",
           callback_data: `favorite:${product.product_id}`
+        },
+        {
+          text: "📤 Share",
+          url: `https://t.me/share/url?url=${encodeURIComponent("https://t.me/"+((env.BOT_USERNAME || BOT_USERNAME_FALLBACK).replace(/^@/,""))+"?start="+product.product_id)}&text=${encodeURIComponent("📚 "+product.title+" — Get it on Tele PDF")}`
         }
       ]
     ]
@@ -1340,7 +1344,11 @@ async function deliverProduct(chatId, product, env) {
   await recordPurchaseDelivery(chatId, product, env);
   await incrementProductStat(env, product.id, "downloads");
   await clearSession(chatId, env);
-  await sendMessage(chatId,"✅ <b>Delivered successfully.</b>",env,mainKeyboard(chatId,env));
+  await sendMessage(chatId,"✅ <b>Delivered successfully.</b>\n\nHow was this resource?",env,{reply_markup:{inline_keyboard:[
+    [{text:"⭐",callback_data:"rate:"+product.product_id+":1"},{text:"⭐⭐",callback_data:"rate:"+product.product_id+":2"},{text:"⭐⭐⭐",callback_data:"rate:"+product.product_id+":3"}],
+    [{text:"⭐⭐⭐⭐",callback_data:"rate:"+product.product_id+":4"},{text:"⭐⭐⭐⭐⭐",callback_data:"rate:"+product.product_id+":5"}],
+    [{text:"🏠 Main Menu",callback_data:"main_menu"}]
+  ]}});
 }
 async function recordPurchaseDelivery(chatId, product, env) {
   try {
@@ -1395,6 +1403,28 @@ async function handleCallback(query, env) {
 
   if (data === "popular_products") {
     await popularProducts(chatId, env);
+    return;
+  }
+
+  if (data.startsWith("rate:")) {
+    const parts=data.split(":");
+    const productId=parts[1];
+    const rating=Math.max(1,Math.min(5,Number(parts[2]||0)));
+    if(!productId || !rating){return;}
+    const products=await sb(env,"products",{select:"id,title",filter:[{column:"product_id",operator:"eq",value:productId},{column:"status",operator:"eq",value:"active"}],limit:1});
+    if(!products.length){await sendMessage(chatId,"❌ Product not found.",env);return;}
+    try {
+      const existing=await sb(env,"product_ratings",{select:"id",filter:[{column:"product_id",operator:"eq",value:products[0].id},{column:"telegram_user_id",operator:"eq",value:chatId}],limit:1});
+      if(existing.length) {
+        await sbUpdate(env,"product_ratings",[{column:"id",operator:"eq",value:existing[0].id}],{rating,status:"published",updated_at:new Date().toISOString()});
+      } else {
+        await sbInsert(env,"product_ratings",{product_id:products[0].id,telegram_user_id:chatId,rating,status:"published"});
+      }
+      await sendMessage(chatId,"⭐ Thanks! Your "+rating+"/5 rating for <b>"+escapeHtml(products[0].title)+"</b> was saved.",env,{reply_markup:{inline_keyboard:[[ {text:"🏠 Main Menu",callback_data:"main_menu"} ]]}}});
+    } catch(e) {
+      console.error("Rating:",e);
+      await sendMessage(chatId,"❌ Rating could not be saved right now.",env);
+    }
     return;
   }
 
@@ -1553,6 +1583,11 @@ async function handleCallback(query, env) {
   if (data.startsWith("delete_admin:")) { if (!isOwner(chatId,env)) return; await sbDelete(env,"admins",[{column:"id",operator:"eq",value:Number(data.substring(13))}]); await adminAdmins(chatId,env); return; }
   if (data.startsWith("delete_link:")) { if (!(await canAdmin(chatId,"product",env))) return; await sbDelete(env,"site_links",[{column:"id",operator:"eq",value:Number(data.substring(12))}]); await adminSiteLinks(chatId,env); return; }
   /* Admin callbacks */
+
+  if (data === "admin_analytics") {
+    if (await isAdmin(chatId, env)) await adminAnalytics(chatId, env);
+    return;
+  }
 
   if (data === "admin_panel") {
     if (await isAdmin(chatId, env)) {
@@ -2002,6 +2037,9 @@ async function adminPanel(chatId, env) {
     [
       { text: "📝 Posts", callback_data: "admin_posts" },
       { text: "👑 Admins", callback_data: "admin_admins" }
+    ],
+    [
+      { text: "📊 Analytics", callback_data: "admin_analytics" }
     ],
     [
       {
@@ -2504,6 +2542,24 @@ async function deleteProduct(chatId, productId, env) {
     `🗑 <b>Product deleted</b>\n\n${escapeHtml(products[0].title)}`,
     env
   );
+}
+
+async function adminAnalytics(chatId, env) {
+  const [users,products,purchases,refs] = await Promise.all([
+    sb(env,"users",{select:"telegram_user_id",limit:5000}),
+    sb(env,"products",{select:"id,title",filter:[{column:"status",operator:"eq",value:"active"}],limit:5000}),
+    sb(env,"purchases",{select:"id,product_id,delivered",filter:[{column:"delivered",operator:"eq",value:"true"}],limit:5000}),
+    sb(env,"referrals",{select:"id,status",limit:5000})
+  ]);
+  const delivered=purchases.length;
+  const active=products.length;
+  const completed=refs.filter(r=>r.status==="completed").length;
+  await sendMessage(chatId,"<b>📊 Tele PDF Analytics</b>\n\n"+
+    "👥 Users: <b>"+users.length+"</b>\n"+
+    "📚 Active products: <b>"+active+"</b>\n"+
+    "📥 Delivered resources: <b>"+delivered+"</b>\n"+
+    "👥 Completed referrals: <b>"+completed+"</b>\n\n"+
+    "Use Supabase/your admin dashboard for full historical analytics.",env,{reply_markup:{inline_keyboard:[[ {text:"🔙 Admin Panel",callback_data:"back_admin"} ]]}}});
 }
 
 /* =========================================================
