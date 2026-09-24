@@ -22,7 +22,7 @@ import { handlePlatform } from "./platform.js";
 const BRAND = "Tele PDF";
 const BOT_USERNAME_FALLBACK = "telepdfsbot";
 const CHANNEL_USERNAME_FALLBACK = "telepdfs";
-const WEBSITE_URL_FALLBACK = "https://telepdfs.blogspot.com";
+const WEBSITE_URL_FALLBACK = "https://pdforbits.blogspot.com";
 
 
 export default {
