@@ -2152,7 +2152,7 @@ async function handleProductUpload(message, session, env) {
       media_type: "file",
       file_unique_id: p.file_unique_id || ""
     };
-  } else if (/^https?:\\/\\//i.test(urlText)) {
+  } else if (/^https?:\/\//i.test(urlText)) {
     media = {
       telegram_file_id: null,
       file_name: null,
