@@ -697,10 +697,14 @@ Choose an option below 👇`,
       const referrer = Number(parts[2]);
 
       if (referrer && referrer !== chatId) {
-        await registerReferral(referrer, chatId, productId, env);
+        await registerReferral(referrer, chatId, productId === "HOME" ? null : productId, env);
       }
 
-      await openProduct(chatId, productId, env);
+      if (productId !== "HOME") {
+        await openProduct(chatId, productId, env);
+      } else {
+        await sendMessage(chatId, "<b>🎉 Welcome via referral!</b>\n\nYour friend invited you to Tele PDF.", env, mainKeyboard(chatId, env));
+      }
       return;
     }
   }
@@ -877,6 +881,7 @@ async function openProduct(chatId, productId, env) {
   }
 
   const product = products[0];
+  await incrementProductStat(env, product.id, "views");
 
   await updateUser(env, chatId, {
     current_product_id: product.id,
@@ -1226,21 +1231,22 @@ async function registerReferral(
   productId,
   env
 ) {
-  const products = await sb(env, "products", {
-    select: "id",
-    filter: [
-      { column: "product_id", operator: "eq", value: productId }
-    ],
-    limit: 1
-  });
-
-  if (!products.length) return;
+  let productDbId = null;
+  if (productId) {
+    const products = await sb(env, "products", {
+      select: "id",
+      filter: [{ column: "product_id", operator: "eq", value: productId }],
+      limit: 1
+    });
+    if (!products.length) return;
+    productDbId = products[0].id;
+  }
 
   try {
     const referralRows = await sbInsert(env, "referrals", {
       referrer_telegram_user_id: referrer,
       referred_telegram_user_id: referred,
-      product_id: products[0].id,
+      product_id: productDbId,
       status: "completed",
       completed_at: new Date().toISOString(),
       expires_at: new Date(
@@ -1332,6 +1338,7 @@ async function deliverProduct(chatId, product, env) {
     : await sendDocument(chatId,product.telegram_file_id,"<b>"+escapeHtml(product.title)+"</b>\n\nDelivered by Tele PDF.",env);
   if (!result.ok) { await sendMessage(chatId,"❌ Telegram could not deliver this media.",env); return; }
   await recordPurchaseDelivery(chatId, product, env);
+  await incrementProductStat(env, product.id, "downloads");
   await clearSession(chatId, env);
   await sendMessage(chatId,"✅ <b>Delivered successfully.</b>",env,mainKeyboard(chatId,env));
 }
@@ -1776,6 +1783,17 @@ async function startSearch(chatId, env) {
   );
 }
 
+async function incrementProductStat(env, productId, metric) {
+  if (!productId || !["views","downloads","shares"].includes(metric)) return;
+  try {
+    await fetch(env.SUPABASE_URL + "/rest/v1/rpc/increment_product_stat", {
+      method:"POST",
+      headers:{apikey:env.SUPABASE_KEY,Authorization:"Bearer "+env.SUPABASE_KEY,"Content-Type":"application/json"},
+      body:JSON.stringify({p_product_id:Number(productId),p_metric:metric})
+    });
+  } catch (e) { console.error("Product stats:", e); }
+}
+
 /* =========================================================
    USER GROWTH & PERSONALIZATION
 ========================================================= */
@@ -1816,7 +1834,8 @@ async function favoritesMenu(chatId, env) {
   const buttons=[];
   for(const r of rows){const p=byId[String(r.product_id)];if(p) buttons.push([{text:"📄 "+String(p.title||"PDF").slice(0,42),callback_data:"open_product:"+p.product_id}]);}
   buttons.push([{text:"🔙 Main Menu",callback_data:"main_menu"}]);
-  await sendMessage(chatId,"⭐ <b>My Favorites</b>\n\nSaved PDFs: <b>"+buttons.length-1+"</b>",env,{reply_markup:{inline_keyboard:buttons}});
+  const count = buttons.length - 1;
+  await sendMessage(chatId,"⭐ <b>My Favorites</b>\n\nSaved PDFs: <b>"+count+"</b>",env,{reply_markup:{inline_keyboard:buttons}});
 }
 
 async function toggleFavorite(chatId, product, env) {
