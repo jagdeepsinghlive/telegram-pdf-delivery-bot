@@ -97,6 +97,14 @@ export async function handlePlatform(request, env, url) {
       return out({ok:true,settings:safe});
     }
 
+    if (request.method === "GET" && path.startsWith("/api/v2/product/") && path.endsWith("/ratings")) {
+      const id = decodeURIComponent(path.substring("/api/v2/product/".length,path.length-"/ratings".length));
+      const products = await db(env,"products",{select:"id",filters:[["product_id","eq",id],["status","eq","active"]],limit:1});
+      if (!products.length) return out({ok:false,error:"Product not found"},404);
+      const rows = await db(env,"product_ratings",{select:"rating,review,created_at",filters:[["product_id","eq",products[0].id],["status","eq","published"]],order:"created_at.desc",limit:100});
+      return out({ok:true,items:rows});
+    }
+
     if (request.method === "GET" && path.startsWith("/api/v2/product/")) {
       const id = decodeURIComponent(path.substring("/api/v2/product/".length));
       const rows = await db(env, "products", {
@@ -106,14 +114,6 @@ export async function handlePlatform(request, env, url) {
       if (!rows.length) return out({ok:false,error:"Product not found"},404);
       const stats = await db(env,"product_stats",{select:"views,downloads,shares,rating_count,avg_rating",filters:[["product_id","eq",rows[0].id]],limit:1}).catch(()=>[]);
       return out({ok:true,product:rows[0],stats:stats[0]||{views:0,downloads:0,shares:0,rating_count:0,avg_rating:0}});
-    }
-
-    if (request.method === "GET" && path.startsWith("/api/v2/product/") && path.endsWith("/ratings")) {
-      const id = decodeURIComponent(path.substring("/api/v2/product/".length,path.length-"/ratings".length));
-      const products = await db(env,"products",{select:"id",filters:[["product_id","eq",id],["status","eq","active"]],limit:1});
-      if (!products.length) return out({ok:false,error:"Product not found"},404);
-      const rows = await db(env,"product_ratings",{select:"rating,review,created_at",filters:[["product_id","eq",products[0].id],["status","eq","published"]],order:"created_at.desc",limit:100});
-      return out({ok:true,items:rows});
     }
 
     if (request.method === "GET" && path === "/api/v2/referral/config") {
