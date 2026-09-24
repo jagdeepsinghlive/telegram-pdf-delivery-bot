@@ -720,10 +720,18 @@ function mainKeyboard(chatId, env) {
   const rows = [
     [
       { text: "📚 Latest PDFs", callback_data: "latest_products" },
-      { text: "🔎 Search PDF", callback_data: "search_products" }
+      { text: "🔥 Popular", callback_data: "popular_products" }
     ],
     [
-      { text: "📂 Categories", callback_data: "categories" },
+      { text: "🔎 Search PDF", callback_data: "search_products" },
+      { text: "📂 Categories", callback_data: "categories" }
+    ],
+    [
+      { text: "⭐ My Favorites", callback_data: "favorites" },
+      { text: "🪙 Coins & Referrals", callback_data: "referral_center" }
+    ],
+    [
+      { text: "👤 My Profile", callback_data: "my_profile" },
       { text: "✨ More", callback_data: "more_menu" }
     ],
     [
@@ -814,6 +822,10 @@ async function sendProductCard(chatId, product, env) {
         {
           text: "📥 Get PDF",
           callback_data: `open_product:${product.product_id}`
+        },
+        {
+          text: "⭐ Save",
+          callback_data: `favorite:${product.product_id}`
         }
       ]
     ]
@@ -1374,6 +1386,35 @@ async function handleCallback(query, env) {
     return;
   }
 
+  if (data === "popular_products") {
+    await popularProducts(chatId, env);
+    return;
+  }
+
+  if (data.startsWith("favorite:")) {
+    const pid=data.substring("favorite:".length);
+    const rows=await sb(env,"products",{select:"id,product_id,title",filter:[{column:"product_id",operator:"eq",value:pid},{column:"status",operator:"eq",value:"active"}],limit:1});
+    if(!rows.length){await sendMessage(chatId,"❌ Product not found.",env);return;}
+    const saved=await toggleFavorite(chatId,rows[0],env);
+    await sendMessage(chatId,saved?"⭐ Saved to your favorites.":"⭐ Removed from your favorites.",env,{reply_markup:{inline_keyboard:[[ {text:"📄 Open PDF",callback_data:"open_product:"+pid} ],[{text:"⭐ My Favorites",callback_data:"favorites"}]]}});
+    return;
+  }
+
+  if (data === "favorites") {
+    await favoritesMenu(chatId, env);
+    return;
+  }
+
+  if (data === "referral_center") {
+    await referralCenter(chatId, env);
+    return;
+  }
+
+  if (data === "my_profile") {
+    await userProfile(chatId, env);
+    return;
+  }
+
   if (data === "search_products") {
     await startSearch(chatId, env);
     return;
@@ -1395,6 +1436,10 @@ async function handleCallback(query, env) {
       reply_markup:{inline_keyboard:[
         [{text:"🔎 Search PDF",callback_data:"search_products"}],
         [{text:"📚 Latest PDFs",callback_data:"latest_products"}],
+        [{text:"🔥 Popular",callback_data:"popular_products"}],
+        [{text:"⭐ My Favorites",callback_data:"favorites"}],
+        [{text:"🪙 Coins & Referrals",callback_data:"referral_center"}],
+        [{text:"👤 My Profile",callback_data:"my_profile"}],
         [{text:"📂 Categories",callback_data:"categories"}],
         ...(website ? [[{text:"🌐 Website",url:website}]] : []),
         [{text:"👨‍💻 Contact Admin",callback_data:"contact_admin"}],
@@ -1729,6 +1774,85 @@ async function startSearch(chatId, env) {
     "🔎 <b>Search Products</b>\n\nSend the PDF/book/notes name you want to search.",
     env
   );
+}
+
+/* =========================================================
+   USER GROWTH & PERSONALIZATION
+========================================================= */
+
+async function popularProducts(chatId, env) {
+  const stats = await sb(env, "product_stats", {
+    select: "product_id,views,downloads,shares,rating_count,avg_rating",
+    order: "downloads.desc,views.desc",
+    limit: 10
+  });
+  const ids = stats.map(x => x.product_id).filter(Boolean);
+  if (!ids.length) {
+    await latestProducts(chatId, env);
+    return;
+  }
+  const products = await sb(env, "products", {
+    select: "id,product_id,title,description,cover_image,product_type,status",
+    filter: [{column:"status",operator:"eq",value:"active"},{column:"id",operator:"in",value:"("+ids.join(",")+")"}],
+    limit: 20
+  });
+  const byId = Object.fromEntries(products.map(p=>[String(p.id),p]));
+  await sendMessage(chatId, "<b>🔥 Popular on Tele PDF</b>\n\nMost downloaded/viewed resources:", env);
+  for (const st of stats) {
+    const p=byId[String(st.product_id)];
+    if (p) await sendProductCard(chatId,p,env);
+  }
+}
+
+async function favoritesMenu(chatId, env) {
+  const rows = await sb(env,"user_favorites",{select:"product_id,created_at",filter:[{column:"telegram_user_id",operator:"eq",value:chatId}],order:"created_at.desc",limit:30});
+  if (!rows.length) {
+    await sendMessage(chatId,"⭐ <b>My Favorites</b>\n\nYou haven't saved any PDFs yet.",env,{reply_markup:{inline_keyboard:[[ {text:"📚 Browse Latest",callback_data:"latest_products"} ],[{text:"🔙 Main Menu",callback_data:"main_menu"}]]}});
+    return;
+  }
+  const ids=rows.map(x=>x.product_id).join(",");
+  const products=await sb(env,"products",{select:"id,product_id,title,description,cover_image,product_type,status",filter:[{column:"id",operator:"in",value:"("+ids+")"},{column:"status",operator:"eq",value:"active"}],limit:50});
+  const byId=Object.fromEntries(products.map(p=>[String(p.id),p]));
+  const buttons=[];
+  for(const r of rows){const p=byId[String(r.product_id)];if(p) buttons.push([{text:"📄 "+String(p.title||"PDF").slice(0,42),callback_data:"open_product:"+p.product_id}]);}
+  buttons.push([{text:"🔙 Main Menu",callback_data:"main_menu"}]);
+  await sendMessage(chatId,"⭐ <b>My Favorites</b>\n\nSaved PDFs: <b>"+buttons.length-1+"</b>",env,{reply_markup:{inline_keyboard:buttons}});
+}
+
+async function toggleFavorite(chatId, product, env) {
+  const rows=await sb(env,"user_favorites",{select:"id",filter:[{column:"telegram_user_id",operator:"eq",value:chatId},{column:"product_id",operator:"eq",value:product.id}],limit:1});
+  if(rows.length){await sbDelete(env,"user_favorites",[{column:"id",operator:"eq",value:rows[0].id}]);return false;}
+  await sbInsert(env,"user_favorites",{telegram_user_id:chatId,product_id:product.id});
+  return true;
+}
+
+async function referralCenter(chatId, env) {
+  const u=await getUser(chatId,env);
+  const code=u?.referral_code || String(chatId);
+  const bot=(env.BOT_USERNAME || (await getSetting(env,"telegram_username")) || BOT_USERNAME_FALLBACK).replace(/^@/,"");
+  const link="https://t.me/"+bot+"?start=ref_"+encodeURIComponent("HOME")+"_"+chatId;
+  const referrals=await sb(env,"referrals",{select:"id,status,created_at",filter:[{column:"referrer_telegram_user_id",operator:"eq",value:chatId}],order:"created_at.desc",limit:100});
+  const coins=Number(u?.coin_balance||0);
+  await sendMessage(chatId,"<b>🪙 Coins & Referrals</b>\n\n💰 Balance: <b>"+coins+" coins</b>\n🎁 Reward: <b>1 coin per successful referral</b>\n👥 Referrals: <b>"+referrals.length+"</b>\n\nShare your link to invite friends:",env,{reply_markup:{inline_keyboard:[
+    [{text:"📤 Share My Link",url:"https://t.me/share/url?url="+encodeURIComponent(link)+"&text="+encodeURIComponent("Get study PDFs from Tele PDF 📚")}],
+    [{text:"⭐ My Favorites",callback_data:"favorites"}],[{text:"🔙 Main Menu",callback_data:"main_menu"}]
+  ]}});
+}
+
+async function userProfile(chatId, env) {
+  const u=await getUser(chatId,env);
+  const purchases=await sb(env,"purchases",{select:"id",filter:[{column:"telegram_user_id",operator:"eq",value:chatId},{column:"delivered",operator:"eq",value:"true"}],limit:1000});
+  const favs=await sb(env,"user_favorites",{select:"id",filter:[{column:"telegram_user_id",operator:"eq",value:chatId}],limit:1000});
+  await sendMessage(chatId,"<b>👤 My Profile</b>\n\n"+
+    "Name: <b>"+escapeHtml(u?.first_name||"Telegram User")+"</b>\n"+
+    (u?.username?"Username: @"+escapeHtml(u.username)+"\n":"")+
+    "🪙 Coins: <b>"+Number(u?.coin_balance||0)+"</b>\n"+
+    "📥 Downloads: <b>"+purchases.length+"</b>\n"+
+    "⭐ Favorites: <b>"+favs.length+"</b>\n"+
+    "👥 Referrals earned: <b>"+Number(u?.total_earned_coins||0)+" coins</b>",env,{reply_markup:{inline_keyboard:[
+      [{text:"⭐ Favorites",callback_data:"favorites"},{text:"🪙 Referrals",callback_data:"referral_center"}],
+      [{text:"🔙 Main Menu",callback_data:"main_menu"}]
+    ]}});
 }
 
 /* =========================================================
