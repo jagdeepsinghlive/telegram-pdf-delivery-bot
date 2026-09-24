@@ -3,7 +3,7 @@
  * Backend-only management/search/rating/referral API for the custom website + admin panel.
  */
 
-const DEFAULT_ORIGIN = "https://telepdfs.blogspot.com";
+const DEFAULT_ORIGIN = "https://pdforbits.blogspot.com";
 
 function corsHeaders(env, request) {
   const configured = String(env.WEBSITE_ORIGIN || DEFAULT_ORIGIN).replace(/\/$/, "");
