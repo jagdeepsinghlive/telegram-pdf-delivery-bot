@@ -199,7 +199,7 @@ export async function handlePlatform(request, env, url) {
       const telegramUserId = Number(claims.sub || claims.id);
       if (!telegramUserId) throw new Error("Telegram user ID missing");
 
-      const existing = await db(env, "users", { select:"id,telegram_user_id", filters:[["telegram_user_id","eq",telegramUserId]], limit:1 });
+      const existing = await db(env, "users", { select:"id,telegram_user_id", filters:[["telegram_user_id","eq",sessionTelegramUserId]], limit:1 });
       const userData = {
         telegram_user_id: telegramUserId,
         username: claims.preferred_username || null,
@@ -337,10 +337,10 @@ export async function handlePlatform(request, env, url) {
       const telegramUserId = Number(decodeURIComponent(path.substring("/api/v2/referral/".length)));
       const session = await getWebSession(request, env);
       if (!session) return out({ok:false,error:"Authentication required"},401,{},env,request);
-      const telegramUserId = Number(session.telegram_user_id);
+      const sessionTelegramUserId = Number(session.telegram_user_id);
       const users = await db(env,"users",{select:"telegram_user_id,username,first_name,coin_balance,total_earned_coins,total_redeemed_coins,referral_code",filters:[["telegram_user_id","eq",telegramUserId]],limit:1});
       if (!users.length) return out({ok:false,error:"User not found"},404);
-      const referrals = await db(env,"referral_rewards",{select:"referred_telegram_user_id,coins,status,created_at",filters:[["referrer_telegram_user_id","eq",telegramUserId]],order:"created_at.desc",limit:100});
+      const referrals = await db(env,"referral_rewards",{select:"referred_telegram_user_id,coins,status,created_at",filters:[["referrer_telegram_user_id","eq",sessionTelegramUserId]],order:"created_at.desc",limit:100});
       return out({ok:true,user:users[0],referrals},200,{},env,request);
     }
 
