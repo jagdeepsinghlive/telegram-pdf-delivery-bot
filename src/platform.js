@@ -6,7 +6,7 @@
 const DEFAULT_ORIGIN = "https://telepdfs.blogspot.com";
 
 function corsHeaders(env, request) {
-  const configured = String(env.WEBSITE_ORIGIN || DEFAULT_ORIGIN).replace(/\\/$/, "");
+  const configured = String(env.WEBSITE_ORIGIN || DEFAULT_ORIGIN).replace(/\/$/, "");
   const origin = request?.headers?.get("Origin") || "";
   const allowed = origin === configured ? origin : configured;
   return {
@@ -31,7 +31,7 @@ function ok(data = {}, env, request) { return out({ ok: true, ...data }, 200, {}
 function base64url(bytes) {
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function randomString(bytes = 32) {
@@ -164,7 +164,7 @@ export async function handlePlatform(request, env, url) {
 
     // Telegram OIDC login: server-generated state + PKCE, then server-side ID-token verification.
     if (request.method === "GET" && path === "/auth/telegram") {
-      const origin = String(env.WEBSITE_ORIGIN || DEFAULT_ORIGIN).replace(/\\/$/, "");
+      const origin = String(env.WEBSITE_ORIGIN || DEFAULT_ORIGIN).replace(/\/$/, "");
       const callback = String(env.TELEGRAM_REDIRECT_URI || (new URL("/auth/telegram/callback", request.url)).toString());
       const state = randomString(32);
       const verifier = randomString(48);
@@ -186,7 +186,7 @@ export async function handlePlatform(request, env, url) {
       const code = url.searchParams.get("code") || "";
       const state = url.searchParams.get("state") || "";
       const error = url.searchParams.get("error");
-      const fallback = String(env.WEBSITE_ORIGIN || DEFAULT_ORIGIN).replace(/\\/$/, "");
+      const fallback = String(env.WEBSITE_ORIGIN || DEFAULT_ORIGIN).replace(/\/$/, "");
       if (error) return Response.redirect(fallback + "/?telegram_login=cancelled", 302);
       if (!code || !state) return out({ok:false,error:"Missing Telegram login parameters"},400,{},env,request);
 
