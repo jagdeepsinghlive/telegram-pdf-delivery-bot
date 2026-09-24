@@ -1218,7 +1218,7 @@ async function registerReferral(
   if (!products.length) return;
 
   try {
-    await sbInsert(env, "referrals", {
+    const referralRows = await sbInsert(env, "referrals", {
       referrer_telegram_user_id: referrer,
       referred_telegram_user_id: referred,
       product_id: products[0].id,
@@ -1228,6 +1228,24 @@ async function registerReferral(
         Date.now() + 20 * 60 * 1000
       ).toISOString()
     });
+    const referralId = Array.isArray(referralRows) ? referralRows[0]?.id : null;
+    try {
+      await fetch(env.SUPABASE_URL + "/rest/v1/rpc/credit_referral_coin", {
+        method: "POST",
+        headers: {
+          apikey: env.SUPABASE_KEY,
+          Authorization: "Bearer " + env.SUPABASE_KEY,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          p_referrer: referrer,
+          p_referred: referred,
+          p_referral_id: referralId
+        })
+      });
+    } catch (coinError) {
+      console.error("Referral coin credit:", coinError);
+    }
   } catch (e) {
     console.error("Referral insert:", e);
   }
