@@ -165,7 +165,7 @@ export async function handlePlatform(request, env, url) {
     // Telegram OIDC login: server-generated state + PKCE, then server-side ID-token verification.
     if (request.method === "GET" && path === "/auth/telegram") {
       const origin = String(env.WEBSITE_ORIGIN || DEFAULT_ORIGIN).replace(/\/$/, "");
-      const callback = String(env.TELEGRAM_REDIRECT_URI || (new URL("/auth/telegram/callback", request.url)).toString());
+      const callback = "https://telegram-pdf-delivery-bot.studybuddynep.workers.dev/auth/telegram/callback";
       const state = randomString(32);
       const verifier = randomString(48);
       const challenge = await sha256Base64Url(verifier);
@@ -193,13 +193,13 @@ export async function handlePlatform(request, env, url) {
       const states = await db(env, "web_auth_states", { select:"state,code_verifier,expires_at", filters:[["state","eq",state]], limit:1 });
       if (!states.length || new Date(states[0].expires_at) <= new Date()) return out({ok:false,error:"Login state expired"},400,{},env,request);
       await db(env, "web_auth_states", { method:"DELETE", filters:[["state","eq",state]] });
-      const callback = String(env.TELEGRAM_REDIRECT_URI || (new URL("/auth/telegram/callback", request.url)).toString());
+      const callback = "https://telegram-pdf-delivery-bot.studybuddynep.workers.dev/auth/telegram/callback";
       const idToken = await telegramOidcToken(env, code, callback, states[0].code_verifier);
       const claims = await verifyTelegramIdToken(env, idToken, state);
       const telegramUserId = Number(claims.sub || claims.id);
       if (!telegramUserId) throw new Error("Telegram user ID missing");
 
-      const existing = await db(env, "users", { select:"id,telegram_user_id", filters:[["telegram_user_id","eq",sessionTelegramUserId]], limit:1 });
+      const existing = await db(env, "users", { select:"id,telegram_user_id", filters:[["telegram_user_id","eq",telegramUserId]], limit:1 });
       const userData = {
         telegram_user_id: telegramUserId,
         username: claims.preferred_username || null,
