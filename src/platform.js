@@ -222,7 +222,24 @@ export async function handlePlatform(request, env, url) {
       if (!session) return out({ok:false,authenticated:false},401,{},env,request);
       const users = await db(env,"users",{select:"telegram_user_id,username,first_name,coin_balance,total_earned_coins,total_redeemed_coins,referral_code,last_seen_at",filters:[["telegram_user_id","eq",session.telegram_user_id]],limit:1});
       if (!users.length) return out({ok:false,authenticated:false},401,{},env,request);
-      return out({ok:true,authenticated:true,user:users[0]},200,{},env,request);
+      const admins = await db(env,"admins",{select:"telegram_user_id,name,role,status",filters:[["telegram_user_id","eq",session.telegram_user_id],["status","eq","active"]],limit:1}).catch(()=>[]);
+      const isAdmin = admins.length > 0;
+      return out({
+        ok:true,
+        authenticated:true,
+        role:isAdmin ? (admins[0].role || "admin") : "user",
+        user:users[0],
+        admin:isAdmin ? admins[0] : null,
+        features:{
+          public_catalog:true,
+          authenticated_profile:true,
+          favorites:true,
+          coins_referrals:true,
+          ratings:true,
+          downloads:true,
+          admin_panel:isAdmin
+        }
+      },200,{},env,request);
     }
 
     if (request.method === "POST" && path === "/api/auth/logout") {
