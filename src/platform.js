@@ -176,6 +176,7 @@ export async function handlePlatform(request, env, url) {
       auth.searchParams.set("response_type", "code");
       auth.searchParams.set("scope", "openid profile");
       auth.searchParams.set("state", state);
+      auth.searchParams.set("nonce", state);
       auth.searchParams.set("code_challenge", challenge);
       auth.searchParams.set("code_challenge_method", "S256");
       return Response.redirect(auth.toString(), 302);
