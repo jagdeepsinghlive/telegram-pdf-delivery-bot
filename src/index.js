@@ -1420,7 +1420,7 @@ async function handleCallback(query, env) {
       } else {
         await sbInsert(env,"product_ratings",{product_id:products[0].id,telegram_user_id:chatId,rating,status:"published"});
       }
-      await sendMessage(chatId,"⭐ Thanks! Your "+rating+"/5 rating for <b>"+escapeHtml(products[0].title)+"</b> was saved.",env,{reply_markup:{inline_keyboard:[[ {text:"🏠 Main Menu",callback_data:"main_menu"} ]]}}});
+      await sendMessage(chatId,"⭐ Thanks! Your "+rating+"/5 rating for <b>"+escapeHtml(products[0].title)+"</b> was saved.",env,{reply_markup:{inline_keyboard:[[ {text:"🏠 Main Menu",callback_data:"main_menu"} ]]}});
     } catch(e) {
       console.error("Rating:",e);
       await sendMessage(chatId,"❌ Rating could not be saved right now.",env);
