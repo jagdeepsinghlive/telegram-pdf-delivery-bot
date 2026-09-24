@@ -2119,21 +2119,86 @@ Send the PDF document now.`,
 async function handleProductUpload(message, session, env) {
   const chatId = message.chat.id;
   const urlText = String(message.text || "").trim();
+
+  let media = null;
+
   if (message.document) {
     const d = message.document;
-    await updateSession(env, chatId, { step:"product_id", telegram_file_id:d.file_id, file_name:d.file_name || "document", file_size:d.file_size || null, mime_type:d.mime_type || "application/octet-stream", media_type:"file" });
+    media = {
+      telegram_file_id: d.file_id,
+      file_name: d.file_name || "document",
+      file_size: d.file_size || null,
+      mime_type: d.mime_type || "application/octet-stream",
+      media_type: "file",
+      file_unique_id: d.file_unique_id || ""
+    };
   } else if (message.video) {
     const v = message.video;
-    await updateSession(env, chatId, { step:"product_id", telegram_file_id:v.file_id, file_name:v.file_name || "video.mp4", file_size:v.file_size || null, mime_type:v.mime_type || "video/mp4", media_type:"video" });
-  } else if (/^https?:\/\//i.test(urlText)) {
-    await updateSession(env, chatId, { step:"product_id", telegram_file_id:null, file_name:null, file_size:null, mime_type:"text/uri-list", media_type:"link", external_url:urlText });
+    media = {
+      telegram_file_id: v.file_id,
+      file_name: v.file_name || "video.mp4",
+      file_size: v.file_size || null,
+      mime_type: v.mime_type || "video/mp4",
+      media_type: "video",
+      file_unique_id: v.file_unique_id || ""
+    };
+  } else if (message.photo && message.photo.length) {
+    const p = message.photo[message.photo.length - 1];
+    media = {
+      telegram_file_id: p.file_id,
+      file_name: "image.jpg",
+      file_size: p.file_size || null,
+      mime_type: "image/jpeg",
+      media_type: "file",
+      file_unique_id: p.file_unique_id || ""
+    };
+  } else if (/^https?:\\/\\//i.test(urlText)) {
+    media = {
+      telegram_file_id: null,
+      file_name: null,
+      file_size: null,
+      mime_type: "text/uri-list",
+      media_type: "link",
+      external_url: urlText,
+      file_unique_id: ""
+    };
   } else {
-    await sendMessage(chatId, "❌ Send a PDF/document, video, or valid http(s) link.", env);
+    await sendMessage(chatId, "❌ Send a PDF/document, video, photo, or valid http(s) link.", env);
     return true;
   }
-  await sendMessage(chatId, "✅ Media received.\n\nStep 2 — Send a unique Product ID.", env);
+
+  // Product ID is generated automatically from the file name + a random suffix.
+  // The admin no longer needs to type a Product ID manually.
+  const baseName = String(media.file_name || "file")
+    .replace(/\\.[^.]+$/, "")
+    .replace(/[^A-Za-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 42) || "file";
+  const randomSuffix = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+  const productId = (baseName + "_" + randomSuffix).slice(0, 80);
+
+  await updateSession(env, chatId, {
+    step: "product_title",
+    product_id: productId,
+    telegram_file_id: media.telegram_file_id,
+    file_name: media.file_name,
+    file_size: media.file_size,
+    mime_type: media.mime_type,
+    media_type: media.media_type,
+    external_url: media.external_url || null
+  });
+
+  await sendMessage(
+    chatId,
+    "✅ File received.\n\n" +
+      "🆔 Automatic Product ID: <code>" + escapeHtml(productId) + "</code>\n\n" +
+      "Step 2/8\n\nSend the product title.",
+    env
+  );
+
   return true;
 }
+
 async function handleProductId(message, session, env) {
   const chatId = message.chat.id;
   const productId = String(message.text || "")
