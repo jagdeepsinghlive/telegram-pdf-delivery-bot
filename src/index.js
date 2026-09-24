@@ -120,7 +120,7 @@ export default {
 ========================================================= */
 
 function corsHeaders(env = {}, request = null) {
-  const configured = String(env.WEBSITE_ORIGIN || WEBSITE_URL_FALLBACK).replace(/\\/$/, "");
+  const configured = String(env.WEBSITE_ORIGIN || WEBSITE_URL_FALLBACK).replace(/\/$/, "");
   const origin = request?.headers?.get("Origin") || "";
   return {
     "Access-Control-Allow-Origin": origin === configured ? origin : configured,
