@@ -32,7 +32,7 @@ export default {
 
       // CORS / preflight
       if (request.method === "OPTIONS") {
-        return corsResponse("", 204);
+        return corsResponse("", 204, {}, env, request);
       }
 
       // Worker is backend/API only. The public website and /admin UI are hosted separately by the owner.
@@ -119,12 +119,16 @@ export default {
    RESPONSE HELPERS
 ========================================================= */
 
-function corsHeaders() {
+function corsHeaders(env = {}, request = null) {
+  const configured = String(env.WEBSITE_ORIGIN || WEBSITE_URL_FALLBACK).replace(/\\/$/, "");
+  const origin = request?.headers?.get("Origin") || "";
   return {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": origin === configured ? origin : configured,
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Telegram-Bot-Api-Secret-Token",
-    "Cache-Control": "no-store"
+    "Access-Control-Allow-Headers": "Content-Type, X-Telegram-Bot-Api-Secret-Token, Authorization",
+    "Access-Control-Allow-Credentials": "true",
+    "Cache-Control": "no-store",
+    "Vary": "Origin"
   };
 }
 
@@ -138,12 +142,12 @@ function json(data, status = 200) {
   });
 }
 
-function corsResponse(body, status = 200, headers = {}) {
+function corsResponse(body, status = 200, headers = {}, env = {}, request = null) {
   return new Response(body, {
     status,
     headers: {
       ...headers,
-      ...corsHeaders()
+      ...corsHeaders(env, request)
     }
   });
 }
