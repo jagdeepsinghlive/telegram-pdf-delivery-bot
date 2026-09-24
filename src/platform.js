@@ -1,5 +1,5 @@
 /**
- * PDF ORBIT Platform API
+ * Tele PDF Platform API
  * Backend-only management/search/rating/referral API for the custom website + admin panel.
  */
 
