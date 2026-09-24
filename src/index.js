@@ -17,6 +17,7 @@
  */
 
 const TG = "https://api.telegram.org";
+import { handlePlatform } from "./platform.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -29,6 +30,10 @@ export default {
       }
 
       // Worker is backend/API only. The public website and /admin UI are hosted separately by the owner.
+
+      // New scalable v2 platform/admin API. The custom website and /admin UI remain external.
+      const platformResponse = await handlePlatform(request, env, url);
+      if (platformResponse) return platformResponse;
 
       // Public website APIs
       if (request.method === "GET" && url.pathname === "/api/products") {
@@ -47,21 +52,6 @@ export default {
         return await apiPosts(env);
       }
 
-      if (request.method === "GET" && url.pathname.startsWith("/category/")) {
-        return await websiteCategory(request, env, decodeURIComponent(url.pathname.substring(9)));
-      }
-
-      if (request.method === "GET" && url.pathname.startsWith("/product/")) {
-        return await websiteProduct(request, env, decodeURIComponent(url.pathname.substring(9)));
-      }
-
-      if (request.method === "GET" && url.pathname.startsWith("/p/")) {
-        return await websiteProduct(request, env, decodeURIComponent(url.pathname.substring(3)));
-      }
-
-      if (request.method === "GET" && url.pathname.startsWith("/post/")) {
-        return await websitePost(request, env, decodeURIComponent(url.pathname.substring(6)));
-      }
 
       if (request.method === "GET" && url.pathname === "/api/search") {
         return await apiSearch(env, url.searchParams.get("q") || "");
