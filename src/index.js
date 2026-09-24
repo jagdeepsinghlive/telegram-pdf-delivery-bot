@@ -2559,7 +2559,7 @@ async function adminAnalytics(chatId, env) {
     "📚 Active products: <b>"+active+"</b>\n"+
     "📥 Delivered resources: <b>"+delivered+"</b>\n"+
     "👥 Completed referrals: <b>"+completed+"</b>\n\n"+
-    "Use Supabase/your admin dashboard for full historical analytics.",env,{reply_markup:{inline_keyboard:[[ {text:"🔙 Admin Panel",callback_data:"back_admin"} ]]}}});
+    "Use Supabase/your admin dashboard for full historical analytics.",env,{reply_markup:{inline_keyboard:[[ {text:"🔙 Admin Panel",callback_data:"back_admin"} ]]}});
 }
 
 /* =========================================================
